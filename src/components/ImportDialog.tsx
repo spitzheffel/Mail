@@ -86,10 +86,19 @@ export function ImportDialog({
         {tab === "text" ? <>
           <div className="format-note redesigned">
             <strong>{t("支持的格式（每行一个账号）")}</strong>
-            <ul><li><code>邮箱地址&lt;TAB&gt;密码&lt;TAB&gt;Client ID&lt;TAB&gt;Refresh Token</code></li><li><code>邮箱地址----密码----Client ID----Refresh Token</code></li></ul>
-            <p>{t("四个字段必须完整；字段之间可使用 Tab 键或四个横线分隔。")}</p>
+            <ul>
+              <li><strong>{t("Outlook/Hotmail OAuth")}</strong></li>
+              <li><code>邮箱地址----密码----Client ID----Refresh Token</code></li>
+              <li><code>邮箱地址&lt;TAB&gt;密码&lt;TAB&gt;Client ID&lt;TAB&gt;Refresh Token</code></li>
+              <li><strong>{t("标准 IMAP 邮箱（Gmail/QQ/163/126/Yahoo/阿里邮箱）")}</strong></li>
+              <li><code>邮箱地址----IMAP授权码/应用密码</code></li>
+              <li><strong>{t("自定义 IMAP")}</strong></li>
+              <li><code>邮箱地址----IMAP密码----imap_host----imap_port</code></li>
+              <li><code>邮箱地址----IMAP密码----imap_host----imap_port----smtp_host----smtp_port</code></li>
+            </ul>
+            <p>{t("系统会根据邮箱后缀和字段数量自动识别账号类型（Outlook OAuth 或标准 IMAP）。标准 IMAP 邮箱只需邮箱和授权码，自定义 IMAP 可指定服务器地址。")}</p>
           </div>
-          <textarea className="import-textarea redesigned" value={raw} onChange={(event) => { setRaw(event.target.value); setFileName(""); }} placeholder={"请粘贴账号信息，每行一个账号\n例如：\nuser@example.com\tpassword123\tclient_id\trefresh_token\nuser2@example.com----password456----client_id2----refresh_token2"} />
+          <textarea className="import-textarea redesigned" value={raw} onChange={(event) => { setRaw(event.target.value); setFileName(""); }} placeholder={"请粘贴账号信息，每行一个账号\n\nOutlook OAuth 示例：\nuser@outlook.com----password123----client_id----refresh_token\n\n标准 IMAP 示例：\nuser@gmail.com----app-password\nuser@qq.com----imap-auth-code\n\n自定义 IMAP 示例：\nuser@example.com----password----imap.example.com----993"} />
         </> : <>
           <div
             className={`file-drop redesigned ${dragging ? "dragging" : ""} ${fileName ? "ready" : ""}`}

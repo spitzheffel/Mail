@@ -275,7 +275,44 @@ func (s *Store) migrateAccounts(ctx context.Context) error {
 		if _, err := s.db.ExecContext(ctx, "ALTER TABLE accounts ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"); err != nil {
 			return err
 		}
-		return s.backfillAccountOrder(ctx)
+		if err := s.backfillAccountOrder(ctx); err != nil {
+			return err
+		}
+		columns, err = tableColumns(ctx, s.db, "accounts")
+		if err != nil {
+			return err
+		}
+	}
+	// 多邮箱提供商字段迁移
+	if !columns["account_type"] {
+		if _, err := s.db.ExecContext(ctx, "ALTER TABLE accounts ADD COLUMN account_type TEXT NOT NULL DEFAULT 'outlook'"); err != nil {
+			return err
+		}
+	}
+	if !columns["provider"] {
+		if _, err := s.db.ExecContext(ctx, "ALTER TABLE accounts ADD COLUMN provider TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if !columns["imap_host"] {
+		if _, err := s.db.ExecContext(ctx, "ALTER TABLE accounts ADD COLUMN imap_host TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if !columns["imap_port"] {
+		if _, err := s.db.ExecContext(ctx, "ALTER TABLE accounts ADD COLUMN imap_port INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+	}
+	if !columns["smtp_host"] {
+		if _, err := s.db.ExecContext(ctx, "ALTER TABLE accounts ADD COLUMN smtp_host TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if !columns["smtp_port"] {
+		if _, err := s.db.ExecContext(ctx, "ALTER TABLE accounts ADD COLUMN smtp_port INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -315,8 +352,10 @@ func (s *Store) migratePlainAccountEmails(ctx context.Context, columns map[strin
 	}
 	statement, err := tx.PrepareContext(ctx, `INSERT INTO accounts
 		(id, owner_key, email_encrypted, email_hash, password_encrypted, client_id_encrypted,
-		 refresh_token_encrypted, remark, group_name, sort_order, created_at, updated_at, last_sync_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)`)
+		 refresh_token_encrypted, remark, group_name, sort_order,
+		 account_type, provider, imap_host, imap_port, smtp_host, smtp_port,
+		 created_at, updated_at, last_sync_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, 'outlook', '', '', 0, '', 0, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
@@ -399,6 +438,12 @@ func accountsSchema(name string) string {
 		remark TEXT NOT NULL DEFAULT '',
 		group_name TEXT NOT NULL DEFAULT '',
 		sort_order INTEGER NOT NULL DEFAULT 0,
+		account_type TEXT NOT NULL DEFAULT 'outlook',
+		provider TEXT NOT NULL DEFAULT '',
+		imap_host TEXT NOT NULL DEFAULT '',
+		imap_port INTEGER NOT NULL DEFAULT 0,
+		smtp_host TEXT NOT NULL DEFAULT '',
+		smtp_port INTEGER NOT NULL DEFAULT 0,
 		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		last_sync_at TEXT,
@@ -426,7 +471,9 @@ func scanStoredAccount(scanner interface{ Scan(...any) error }) (model.StoredAcc
 	err := scanner.Scan(
 		&row.ID, &row.OwnerKey, &row.EmailEncrypted, &row.EmailHash,
 		&row.PasswordEncrypted, &row.ClientIDEncrypted, &row.RefreshTokenEncrypted,
-		&row.Remark, &row.GroupName, &row.SortOrder, &row.CreatedAt, &row.UpdatedAt, &lastSync,
+		&row.Remark, &row.GroupName, &row.SortOrder,
+		&row.AccountType, &row.Provider, &row.IMAPHost, &row.IMAPPort, &row.SMTPHost, &row.SMTPPort,
+		&row.CreatedAt, &row.UpdatedAt, &lastSync,
 	)
 	if lastSync.Valid {
 		row.LastSyncAt = &lastSync.String
@@ -436,6 +483,7 @@ func scanStoredAccount(scanner interface{ Scan(...any) error }) (model.StoredAcc
 
 const accountColumns = `id, owner_key, email_encrypted, email_hash, password_encrypted,
 	client_id_encrypted, refresh_token_encrypted, remark, group_name, sort_order,
+	account_type, provider, imap_host, imap_port, smtp_host, smtp_port,
 	created_at, updated_at, last_sync_at`
 
 func uniquePositiveIDs(ids []int64) ([]int64, bool) {

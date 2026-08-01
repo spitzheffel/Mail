@@ -84,7 +84,8 @@ func (s *Service) SyncChanges(ctx context.Context, account *model.AccountCredent
 			var state imapSyncState
 			batch, state, err = s.syncIMAPChanges(ctx, account, folder, state, limit)
 			nextState = state
-			if err != nil && syncErrorCode(err) != "CURSOR_RESET_REQUIRED" && syncErrorCode(err) != "MAIL_FOLDER_NOT_FOUND" {
+			// 标准 IMAP 账号不回退 Graph
+			if err != nil && !isIMAPAccount(account) && syncErrorCode(err) != "CURSOR_RESET_REQUIRED" && syncErrorCode(err) != "MAIL_FOLDER_NOT_FOUND" {
 				provider = "graph"
 				var graphState graphSyncState
 				batch, graphState, err = s.syncGraphChanges(ctx, account, "graph:"+graphFolder(folder), graphState, limit)
@@ -131,7 +132,7 @@ func (s *Service) UnreadSummary(ctx context.Context, accounts []model.AccountCre
 		account := &accounts[index]
 		provider := "imap"
 		folders, err := s.imapUnreadSummary(ctx, account)
-		if err != nil {
+		if err != nil && !isIMAPAccount(account) {
 			provider = "graph"
 			folders, err = s.graphUnreadSummary(ctx, account)
 		}

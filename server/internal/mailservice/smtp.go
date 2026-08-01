@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/smtp"
+	"strconv"
 	"time"
 
 	"github.com/amine123max/Mail/server/internal/model"
@@ -48,6 +49,11 @@ func (s *Service) smtpSend(ctx context.Context, account *model.AccountCredential
 	if err != nil {
 		return SendResult{}, err
 	}
+	// 标准 IMAP 账号：用户名 + 密码/授权码 SMTP 认证
+	if isIMAPAccount(account) {
+		return s.smtpSendPlain(ctx, account, raw, accepted, messageID)
+	}
+	// Outlook OAuth 账号：XOAUTH2 SMTP 认证
 	var lastError error
 	for _, host := range s.cfg.SMTPHosts {
 		endpoint := smtpEndpoint{
@@ -160,4 +166,88 @@ func fieldsUpper(value string) []string {
 	}
 	flush()
 	return fields
+}
+
+// smtpSendPlain 用用户名 + 密码/授权码通过标准 SMTP 发件。
+func (s *Service) smtpSendPlain(ctx context.Context, account *model.AccountCredentials, raw []byte, recipients []string, messageID string) (SendResult, error) {
+	provider := s.resolveProvider(account)
+	host := provider.SMTPHost
+	port := provider.SMTPPort
+	if port == 0 {
+		port = 465
+	}
+	address := net.JoinHostPort(host, strconv.Itoa(port))
+
+	dialer := &net.Dialer{Timeout: 20 * time.Second}
+	connection, err := dialer.DialContext(ctx, "tcp", address)
+	if err != nil {
+		return SendResult{}, serviceError("SMTP 连接失败："+errorMessage(err), "SMTP_SEND_FAILED", http.StatusBadGateway)
+	}
+	defer connection.Close()
+
+	deadline := time.Now().Add(45 * time.Second)
+	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
+		deadline = contextDeadline
+	}
+	if err := connection.SetDeadline(deadline); err != nil {
+		return SendResult{}, err
+	}
+
+	// 隐式 TLS (端口 465)：直接 TLS 连接
+	if provider.SMTPSSL == "tls" {
+		tlsConfig := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}
+		tlsConn := tls.Client(connection, tlsConfig)
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			return SendResult{}, serviceError("SMTP TLS 握手失败："+errorMessage(err), "SMTP_SEND_FAILED", http.StatusBadGateway)
+		}
+		connection = tlsConn
+	}
+
+	smtpClient, err := smtp.NewClient(connection, host)
+	if err != nil {
+		return SendResult{}, serviceError("SMTP 客户端初始化失败："+errorMessage(err), "SMTP_SEND_FAILED", http.StatusBadGateway)
+	}
+	defer smtpClient.Close()
+
+	if err := smtpClient.Hello("mail.local"); err != nil {
+		return SendResult{}, serviceError("SMTP HELO 失败："+errorMessage(err), "SMTP_SEND_FAILED", http.StatusBadGateway)
+	}
+
+	// STARTTLS (端口 587)：先明文连接再升级
+	if provider.SMTPSSL == "starttls" {
+		if ok, _ := smtpClient.Extension("STARTTLS"); !ok {
+			return SendResult{}, serviceError("SMTP 服务器不支持 STARTTLS", "SMTP_SEND_FAILED", http.StatusBadGateway)
+		}
+		if err := smtpClient.StartTLS(&tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}); err != nil {
+			return SendResult{}, serviceError("SMTP STARTTLS 失败："+errorMessage(err), "SMTP_SEND_FAILED", http.StatusBadGateway)
+		}
+	}
+
+	// PLAIN 认证
+	auth := smtp.PlainAuth("", account.Email, account.Password, host)
+	if err := smtpClient.Auth(auth); err != nil {
+		return SendResult{}, serviceError("SMTP 认证失败：邮箱或授权码不正确", "MAIL_AUTH_REQUIRED", http.StatusUnauthorized)
+	}
+
+	if err := smtpClient.Mail(account.Email); err != nil {
+		return SendResult{}, serviceError("SMTP 发件人设置失败："+errorMessage(err), "SMTP_SEND_FAILED", http.StatusBadGateway)
+	}
+	for _, recipient := range recipients {
+		if err := smtpClient.Rcpt(recipient); err != nil {
+			return SendResult{}, serviceError("SMTP 收件人设置失败："+errorMessage(err), "SMTP_SEND_FAILED", http.StatusBadGateway)
+		}
+	}
+	writer, err := smtpClient.Data()
+	if err != nil {
+		return SendResult{}, serviceError("SMTP DATA 失败："+errorMessage(err), "SMTP_SEND_FAILED", http.StatusBadGateway)
+	}
+	if _, err := writer.Write(raw); err != nil {
+		_ = writer.Close()
+		return SendResult{}, serviceError("SMTP 写入邮件失败："+errorMessage(err), "SMTP_SEND_FAILED", http.StatusBadGateway)
+	}
+	if err := writer.Close(); err != nil {
+		return SendResult{}, serviceError("SMTP 发送完成失败："+errorMessage(err), "SMTP_SEND_FAILED", http.StatusBadGateway)
+	}
+	_ = smtpClient.Quit()
+	return SendResult{MessageID: messageID, Accepted: recipients, Transport: "smtp"}, nil
 }

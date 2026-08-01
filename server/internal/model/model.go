@@ -16,6 +16,12 @@ type StoredAccount struct {
 	CreatedAt             string
 	UpdatedAt             string
 	LastSyncAt            *string
+	AccountType           string
+	Provider              string
+	IMAPHost              string
+	IMAPPort              int
+	SMTPHost              string
+	SMTPPort              int
 }
 
 type AccountCredentials struct {
@@ -26,6 +32,12 @@ type AccountCredentials struct {
 	ClientID     string `json:"-"`
 	RefreshToken string `json:"-"`
 	Remark       string `json:"remark"`
+	AccountType  string `json:"accountType"`
+	Provider     string `json:"provider"`
+	IMAPHost     string `json:"-"`
+	IMAPPort     int    `json:"-"`
+	SMTPHost     string `json:"-"`
+	SMTPPort     int    `json:"-"`
 }
 
 type ImportedAccount struct {
@@ -34,16 +46,24 @@ type ImportedAccount struct {
 	ClientID     string
 	RefreshToken string
 	Remark       string
+	AccountType  string
+	Provider     string
+	IMAPHost     string
+	IMAPPort     int
+	SMTPHost     string
+	SMTPPort     int
 }
 
 type PublicAccount struct {
-	ID         int64   `json:"id"`
-	Email      string  `json:"email"`
-	Remark     string  `json:"remark"`
-	Group      string  `json:"group"`
-	CreatedAt  string  `json:"createdAt"`
-	UpdatedAt  string  `json:"updatedAt"`
-	LastSyncAt *string `json:"lastSyncAt"`
+	ID          int64   `json:"id"`
+	Email       string  `json:"email"`
+	Remark      string  `json:"remark"`
+	Group       string  `json:"group"`
+	AccountType string  `json:"accountType"`
+	Provider    string  `json:"provider"`
+	CreatedAt   string  `json:"createdAt"`
+	UpdatedAt   string  `json:"updatedAt"`
+	LastSyncAt  *string `json:"lastSyncAt"`
 }
 
 type User struct {

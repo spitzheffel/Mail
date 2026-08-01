@@ -36,9 +36,75 @@ func (s *Service) connectIMAP(ctx context.Context, account *model.AccountCredent
 }
 
 func (s *Service) connectIMAPWithTimeout(ctx context.Context, account *model.AccountCredentials, accessToken string, timeout time.Duration) (*client.Client, error) {
+	// 标准 IMAP 账号：用户名 + 密码/授权码直连
+	if isIMAPAccount(account) {
+		return s.connectIMAPPlain(ctx, account, timeout)
+	}
+	// Outlook OAuth 账号：XOAUTH2 SASL 认证
+	return s.connectIMAPOAuth(ctx, account, accessToken, timeout)
+}
+
+// connectIMAPPlain 用用户名 + 密码/授权码直连 IMAP 服务器。
+func (s *Service) connectIMAPPlain(ctx context.Context, account *model.AccountCredentials, timeout time.Duration) (*client.Client, error) {
+	provider := s.resolveProvider(account)
+	host := provider.IMAPHost
+	port := provider.IMAPPort
+	if port == 0 {
+		port = 993
+	}
+	dialer := &net.Dialer{Timeout: 15 * time.Second}
+	connection, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+	if err != nil {
+		return nil, serviceError("无法连接 IMAP 服务器 "+host+"："+errorMessage(err), "IMAP_CONNECTION_FAILED", http.StatusBadGateway)
+	}
+	deadline := time.Now().Add(timeout)
+	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
+		deadline = contextDeadline
+	}
+	if err := connection.SetDeadline(deadline); err != nil {
+		_ = connection.Close()
+		return nil, err
+	}
+	tlsConnection := tls.Client(connection, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
+	if err := tlsConnection.HandshakeContext(ctx); err != nil {
+		_ = connection.Close()
+		return nil, serviceError("IMAP TLS 握手失败："+errorMessage(err), "IMAP_CONNECTION_FAILED", http.StatusBadGateway)
+	}
+	imapClient, err := client.New(tlsConnection)
+	if err != nil {
+		_ = connection.Close()
+		return nil, serviceError("IMAP 客户端初始化失败："+errorMessage(err), "IMAP_CONNECTION_FAILED", http.StatusBadGateway)
+	}
+	imapClient.Timeout = timeout
+	if err := imapClient.Login(account.Email, account.Password); err != nil {
+		_ = imapClient.Terminate()
+		return nil, serviceError("IMAP 登录失败：邮箱或授权码不正确", "MAIL_AUTH_REQUIRED", http.StatusUnauthorized)
+	}
+	deadline = time.Now().Add(timeout)
+	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
+		deadline = contextDeadline
+	}
+	if err := tlsConnection.SetDeadline(deadline); err != nil {
+		_ = imapClient.Terminate()
+		return nil, err
+	}
+	return imapClient, nil
+}
+
+// connectIMAPOAuth 用 XOAUTH2 SASL 认证连接 Outlook IMAP（原有逻辑）。
+func (s *Service) connectIMAPOAuth(ctx context.Context, account *model.AccountCredentials, accessToken string, timeout time.Duration) (*client.Client, error) {
+	provider := s.resolveProvider(account)
+	hosts := []string{provider.IMAPHost}
+	// Outlook 可能需要回退到 live.com
+	if provider.ID == "outlook" {
+		hosts = s.cfg.IMAPHosts
+		if len(hosts) == 0 {
+			hosts = []string{provider.IMAPHost}
+		}
+	}
 	var lastError error
 	authenticationFailed := false
-	for _, host := range s.cfg.IMAPHosts {
+	for _, host := range hosts {
 		dialer := &net.Dialer{Timeout: 15 * time.Second}
 		connection, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, "993"))
 		if err != nil {

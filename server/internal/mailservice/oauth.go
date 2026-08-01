@@ -37,6 +37,10 @@ type tokenResponse struct {
 }
 
 func (s *Service) RefreshAccessToken(ctx context.Context, account *model.AccountCredentials, requestedScope string) (TokenResult, error) {
+	// 标准 IMAP 账号不需要 OAuth 令牌
+	if isIMAPAccount(account) {
+		return TokenResult{}, nil
+	}
 	values := url.Values{"client_id": {account.ClientID}, "grant_type": {"refresh_token"}, "refresh_token": {account.RefreshToken}}
 	if requestedScope != "" {
 		values.Set("scope", requestedScope)

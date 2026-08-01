@@ -69,6 +69,9 @@ func (s *Store) GetAccountCredentials(ctx context.Context, ownerKey string, id i
 	return &model.AccountCredentials{
 		ID: id, OwnerKey: ownerKey, Email: email, Password: password,
 		ClientID: clientID, RefreshToken: refreshToken, Remark: row.Remark,
+		AccountType: row.AccountType, Provider: row.Provider,
+		IMAPHost: row.IMAPHost, IMAPPort: row.IMAPPort,
+		SMTPHost: row.SMTPHost, SMTPPort: row.SMTPPort,
 	}, nil
 }
 
@@ -101,9 +104,13 @@ func (s *Store) ImportAccounts(ctx context.Context, ownerKey string, accounts []
 		}
 		if exists {
 			_, err = tx.ExecContext(ctx, `UPDATE accounts SET email_encrypted=?, password_encrypted=?,
-				client_id_encrypted=?, refresh_token_encrypted=?, remark=?, updated_at=?
+				client_id_encrypted=?, refresh_token_encrypted=?, remark=?,
+				account_type=?, provider=?, imap_host=?, imap_port=?, smtp_host=?, smtp_port=?,
+				updated_at=?
 				WHERE owner_key=? AND email_hash=?`, email, password, clientID, refreshToken,
-				account.Remark, nowISO(), ownerKey, emailHash)
+				account.Remark, account.AccountType, account.Provider,
+				account.IMAPHost, account.IMAPPort, account.SMTPHost, account.SMTPPort,
+				nowISO(), ownerKey, emailHash)
 			if err != nil {
 				return result, err
 			}
@@ -111,8 +118,10 @@ func (s *Store) ImportAccounts(ctx context.Context, ownerKey string, accounts []
 			continue
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO accounts
-			(owner_key,email_encrypted,email_hash,password_encrypted,client_id_encrypted,refresh_token_encrypted,remark,sort_order)
-			VALUES(?,?,?,?,?,?,?,?)`, ownerKey, email, emailHash, password, clientID, refreshToken, account.Remark, nextOrder)
+			(owner_key,email_encrypted,email_hash,password_encrypted,client_id_encrypted,refresh_token_encrypted,remark,sort_order,
+			 account_type,provider,imap_host,imap_port,smtp_host,smtp_port)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, ownerKey, email, emailHash, password, clientID, refreshToken, account.Remark, nextOrder,
+			account.AccountType, account.Provider, account.IMAPHost, account.IMAPPort, account.SMTPHost, account.SMTPPort)
 		if err != nil {
 			return result, err
 		}
@@ -333,6 +342,7 @@ func (s *Store) publicAccount(row model.StoredAccount) (model.PublicAccount, err
 	}
 	return model.PublicAccount{
 		ID: row.ID, Email: email, Remark: row.Remark, Group: row.GroupName,
+		AccountType: row.AccountType, Provider: row.Provider,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, LastSyncAt: row.LastSyncAt,
 	}, nil
 }

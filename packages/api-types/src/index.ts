@@ -3,6 +3,8 @@ export interface Account {
   email: string;
   remark: string;
   group: string;
+  accountType?: string;
+  provider?: string;
   createdAt: string;
   updatedAt: string;
   lastSyncAt: string | null;

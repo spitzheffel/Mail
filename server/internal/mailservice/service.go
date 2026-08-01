@@ -13,6 +13,18 @@ import (
 
 func (s *Service) TestAccount(ctx context.Context, account *model.AccountCredentials) (map[string]any, error) {
 	result := map[string]any{"folders": 0, "canSend": false, "scope": "", "receiveTransport": ""}
+	// 标准 IMAP 账号：直接走 IMAP，不走 OAuth/Graph
+	if isIMAPAccount(account) {
+		folders, err := s.imapFolders(ctx, account, "")
+		if err != nil {
+			return nil, err
+		}
+		result["folders"] = len(folders)
+		result["receiveTransport"] = "imap"
+		result["canSend"] = true
+		_ = s.store.MarkAccountSynced(ctx, account.OwnerKey, account.ID)
+		return result, nil
+	}
 	var receiveError error
 	if token, err := s.RefreshAccessToken(ctx, account, imapScope); err == nil {
 		if folders, err := s.imapFolders(ctx, account, token.AccessToken); err == nil {
@@ -45,6 +57,11 @@ func (s *Service) TestAccount(ctx context.Context, account *model.AccountCredent
 }
 
 func (s *Service) ListFolders(ctx context.Context, account *model.AccountCredentials) ([]Folder, error) {
+	// 标准 IMAP 账号：直接走 IMAP，不回退 Graph
+	if isIMAPAccount(account) {
+		token, _ := s.RefreshAccessToken(ctx, account, imapScope)
+		return s.imapFolders(ctx, account, token.AccessToken)
+	}
 	var imapError error
 	if token, err := s.RefreshAccessToken(ctx, account, imapScope); err == nil {
 		folders, err := s.imapFolders(ctx, account, token.AccessToken)
@@ -67,6 +84,11 @@ func (s *Service) ListFolders(ctx context.Context, account *model.AccountCredent
 }
 
 func (s *Service) ListMessages(ctx context.Context, account *model.AccountCredentials, folder string, page, pageSize int, query string) (map[string]any, error) {
+	// 标准 IMAP 账号：直接走 IMAP，不回退 Graph
+	if isIMAPAccount(account) {
+		token, _ := s.RefreshAccessToken(ctx, account, imapScope)
+		return s.imapListMessages(ctx, account, token.AccessToken, folder, page, pageSize, query)
+	}
 	if strings.HasPrefix(folder, "graph:") {
 		token, err := s.RefreshAccessToken(ctx, account, graphReadScope)
 		if err != nil {
@@ -96,6 +118,11 @@ func (s *Service) ListMessages(ctx context.Context, account *model.AccountCreden
 }
 
 func (s *Service) GetMessage(ctx context.Context, account *model.AccountCredentials, folder, uid string) (MessageDetail, error) {
+	// 标准 IMAP 账号：直接走 IMAP
+	if isIMAPAccount(account) {
+		token, _ := s.RefreshAccessToken(ctx, account, imapScope)
+		return s.imapGetMessage(ctx, account, token.AccessToken, folder, uid)
+	}
 	if strings.HasPrefix(folder, "graph:") || strings.HasPrefix(uid, "graph:") {
 		token, err := s.RefreshAccessToken(ctx, account, graphReadScope)
 		if err != nil {
@@ -113,6 +140,11 @@ func (s *Service) GetMessage(ctx context.Context, account *model.AccountCredenti
 }
 
 func (s *Service) GetAttachment(ctx context.Context, account *model.AccountCredentials, folder, uid, attachmentID string) (AttachmentContent, error) {
+	// 标准 IMAP 账号：直接走 IMAP
+	if isIMAPAccount(account) {
+		token, _ := s.RefreshAccessToken(ctx, account, imapScope)
+		return s.imapGetAttachment(ctx, account, token.AccessToken, folder, uid, attachmentID)
+	}
 	if strings.HasPrefix(folder, "graph:") || strings.HasPrefix(uid, "graph:") {
 		token, err := s.RefreshAccessToken(ctx, account, graphReadScope)
 		if err != nil {
@@ -128,6 +160,11 @@ func (s *Service) GetAttachment(ctx context.Context, account *model.AccountCrede
 }
 
 func (s *Service) SetMessageRead(ctx context.Context, account *model.AccountCredentials, folder, uid string, read bool) error {
+	// 标准 IMAP 账号：直接走 IMAP
+	if isIMAPAccount(account) {
+		token, _ := s.RefreshAccessToken(ctx, account, imapScope)
+		return s.imapSetRead(ctx, account, token.AccessToken, folder, uid, read)
+	}
 	if strings.HasPrefix(folder, "graph:") || strings.HasPrefix(uid, "graph:") {
 		token, err := s.RefreshAccessToken(ctx, account, graphReadScope)
 		if err != nil {
@@ -143,6 +180,11 @@ func (s *Service) SetMessageRead(ctx context.Context, account *model.AccountCred
 }
 
 func (s *Service) DeleteMessage(ctx context.Context, account *model.AccountCredentials, folder, uid string) error {
+	// 标准 IMAP 账号：直接走 IMAP
+	if isIMAPAccount(account) {
+		token, _ := s.RefreshAccessToken(ctx, account, imapScope)
+		return s.imapDeleteMessage(ctx, account, token.AccessToken, folder, uid)
+	}
 	if strings.HasPrefix(folder, "graph:") || strings.HasPrefix(uid, "graph:") {
 		token, err := s.RefreshAccessToken(ctx, account, graphReadScope)
 		if err != nil {
@@ -158,6 +200,11 @@ func (s *Service) DeleteMessage(ctx context.Context, account *model.AccountCrede
 }
 
 func (s *Service) MoveMessage(ctx context.Context, account *model.AccountCredentials, folder, uid, target string) error {
+	// 标准 IMAP 账号：直接走 IMAP
+	if isIMAPAccount(account) {
+		token, _ := s.RefreshAccessToken(ctx, account, imapScope)
+		return s.imapMoveMessage(ctx, account, token.AccessToken, folder, uid, target)
+	}
 	if strings.HasPrefix(folder, "graph:") || strings.HasPrefix(uid, "graph:") {
 		token, err := s.RefreshAccessToken(ctx, account, graphReadScope)
 		if err != nil {
@@ -173,6 +220,11 @@ func (s *Service) MoveMessage(ctx context.Context, account *model.AccountCredent
 }
 
 func (s *Service) SetMessageFlag(ctx context.Context, account *model.AccountCredentials, folder, uid string, flagged bool) error {
+	// 标准 IMAP 账号：直接走 IMAP
+	if isIMAPAccount(account) {
+		token, _ := s.RefreshAccessToken(ctx, account, imapScope)
+		return s.imapSetFlag(ctx, account, token.AccessToken, folder, uid, flagged)
+	}
 	if strings.HasPrefix(folder, "graph:") || strings.HasPrefix(uid, "graph:") {
 		token, err := s.RefreshAccessToken(ctx, account, graphReadScope)
 		if err != nil {
@@ -205,7 +257,15 @@ func (s *Service) SendMessage(ctx context.Context, account *model.AccountCredent
 	case "smtp":
 		return s.sendMessageSMTP(ctx, account, message)
 	case "graph":
+		// 标准 IMAP 账号不支持 Graph 发件
+		if isIMAPAccount(account) {
+			return SendResult{}, serviceError("此邮箱类型不支持 Graph 发件", "SMTP_SEND_FAILED", http.StatusBadRequest)
+		}
 		return s.sendMessageGraph(ctx, account, message)
+	}
+	// 自动选择：IMAP 账号只走 SMTP
+	if isIMAPAccount(account) {
+		return s.sendMessageSMTP(ctx, account, message)
 	}
 	var smtpError error
 	if result, err := s.sendMessageSMTP(ctx, account, message); err == nil {
@@ -221,6 +281,10 @@ func (s *Service) SendMessage(ctx context.Context, account *model.AccountCredent
 }
 
 func (s *Service) sendMessageSMTP(ctx context.Context, account *model.AccountCredentials, message SendRequest) (SendResult, error) {
+	// 标准 IMAP 账号：直接用密码/授权码发件
+	if isIMAPAccount(account) {
+		return s.smtpSend(ctx, account, "", message)
+	}
 	token, err := s.RefreshAccessToken(ctx, account, smtpScope)
 	if err != nil {
 		return SendResult{}, err
