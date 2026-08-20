@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -252,6 +255,61 @@ func TestMailOperationClaimsAreOwnerScopedAndReplayCompletedResults(t *testing.T
 	claim, err = storage.ClaimMailOperation(ctx, "user:2", "operation-12345678", "flag", "hash-one")
 	if err != nil || claim != MailOperationClaimed {
 		t.Fatalf("released operation could not be retried: %q %v", claim, err)
+	}
+}
+
+func TestAPIKeyPersistenceIsolationAndLimit(t *testing.T) {
+	storage := openTestStore(t)
+	ctx := context.Background()
+	alpha, err := storage.CreateUser(ctx, "alpha", "hash", "alpha@example.com", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beta, err := storage.CreateUser(ctx, "beta", "hash", "beta@example.com", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := "mlk_" + strings.Repeat("a", 32)
+	digest := sha256.Sum256([]byte(token))
+	hash := hex.EncodeToString(digest[:])
+	created, err := storage.InsertAPIKey(ctx, alpha.ID, "n8n", token[:12], hash)
+	if err != nil || created == nil {
+		t.Fatalf("insert API key failed: %#v %v", created, err)
+	}
+	var storedHash, storedName string
+	if err := storage.DB().QueryRow("SELECT token_hash,name FROM api_keys WHERE id=?", created.ID).Scan(&storedHash, &storedName); err != nil {
+		t.Fatal(err)
+	}
+	if storedHash != hash || storedName != "n8n" || strings.Contains(storedHash, token) {
+		t.Fatalf("API key persistence mismatch: hash=%q name=%q", storedHash, storedName)
+	}
+	foreign, err := storage.DeleteAPIKey(ctx, beta.ID, created.ID)
+	if err != nil || foreign {
+		t.Fatalf("cross-user delete succeeded: deleted=%v err=%v", foreign, err)
+	}
+	own, err := storage.DeleteAPIKey(ctx, alpha.ID, created.ID)
+	if err != nil || !own {
+		t.Fatalf("owner delete failed: deleted=%v err=%v", own, err)
+	}
+	var remaining int
+	if err := storage.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM api_keys WHERE id=?", created.ID).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Fatalf("deleted API key row is still present: %d", remaining)
+	}
+
+	for i := 0; i < MaxAPIKeysPerUser; i++ {
+		item := fmt.Sprintf("mlk_%032d", i)
+		itemHash := sha256.Sum256([]byte(item))
+		if _, err := storage.InsertAPIKey(ctx, beta.ID, fmt.Sprintf("key-%d", i), item[:12], hex.EncodeToString(itemHash[:])); err != nil {
+			t.Fatalf("insert %d failed: %v", i, err)
+		}
+	}
+	overflow := "mlk_" + strings.Repeat("z", 32)
+	overflowHash := sha256.Sum256([]byte(overflow))
+	if _, err := storage.InsertAPIKey(ctx, beta.ID, "overflow", overflow[:12], hex.EncodeToString(overflowHash[:])); !errors.Is(err, ErrAPIKeyLimitReached) {
+		t.Fatalf("key limit was not enforced: %v", err)
 	}
 }
 

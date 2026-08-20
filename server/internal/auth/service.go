@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/amine123max/Mail/server/internal/config"
 	"github.com/amine123max/Mail/server/internal/desktopcontract"
@@ -43,6 +44,8 @@ const (
 	desktopRefreshIdle     = 14 * 24 * time.Hour
 	desktopRefreshAbsolute = 30 * 24 * time.Hour
 	dummyPasswordHash      = "scrypt:AAECAwQFBgcICQoLDA0ODw:sW1COcKH7Z2BDFE6mMHuCBgIPw6OwcK45RqKR1FrA7g"
+	apiKeyTokenPrefix      = "mlk_"
+	apiKeyDisplayPrefixLen = 12
 )
 
 type Error struct {
@@ -149,7 +152,7 @@ func (s *Service) ResetPassword(ctx context.Context, email, password, code strin
 	return s.store.UpdateUserPassword(ctx, user.ID, hash)
 }
 
-func (s *Service) InitializeAdministrator(ctx context.Context, username, email, password, code string) (*model.User, error) {
+func (s *Service) InitializeAdministrator(ctx context.Context, username, email, password string) (*model.User, error) {
 	setup, err := s.store.IsSetupRequired(ctx)
 	if err != nil {
 		return nil, err
@@ -157,19 +160,7 @@ func (s *Service) InitializeAdministrator(ctx context.Context, username, email, 
 	if !setup {
 		return nil, authError("管理员初始化已完成", "SETUP_ALREADY_COMPLETED", http.StatusConflict)
 	}
-	email = normalizeEmail(email)
-	if err := s.verifyCode(ctx, email, code); err != nil {
-		return nil, err
-	}
-	hash, err := hashPassword(password)
-	if err != nil {
-		return nil, err
-	}
-	user, err := s.store.CreateAdministrator(ctx, username, hash, email)
-	if errors.Is(err, store.ErrSetupCompleted) {
-		return nil, authError("管理员初始化已完成", "SETUP_ALREADY_COMPLETED", http.StatusConflict)
-	}
-	return user, err
+	return s.BootstrapAdministrator(ctx, username, email, password)
 }
 
 func (s *Service) BootstrapAdministrator(ctx context.Context, username, email, password string) (*model.User, error) {
@@ -194,14 +185,57 @@ func (s *Service) BootstrapAdministrator(ctx context.Context, username, email, p
 	return user, err
 }
 
+func (s *Service) CreateAPIKey(ctx context.Context, userID int64, name string) (*model.CreatedAPIKey, error) {
+	name = strings.TrimSpace(name)
+	if n := utf8.RuneCountInString(name); n < 1 || n > 64 {
+		return nil, authError("API Key 名称必须为 1-64 个字符", "INVALID_API_KEY_NAME", http.StatusBadRequest)
+	}
+	secret, err := randomToken(32)
+	if err != nil {
+		return nil, err
+	}
+	token := apiKeyTokenPrefix + secret
+	if len(token) < apiKeyDisplayPrefixLen {
+		return nil, authError("无法生成 API Key", "API_KEY_GENERATE_FAILED", http.StatusInternalServerError)
+	}
+	record, err := s.store.InsertAPIKey(ctx, userID, name, token[:apiKeyDisplayPrefixLen], hashAPIKeyToken(token))
+	if errors.Is(err, store.ErrAPIKeyLimitReached) {
+		return nil, authError("每个用户最多保留 10 个 API Key", "API_KEY_LIMIT_REACHED", http.StatusConflict)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &model.CreatedAPIKey{APIKey: *record, Token: token}, nil
+}
+
+func (s *Service) ListAPIKeys(ctx context.Context, userID int64) ([]model.APIKey, error) {
+	return s.store.ListAPIKeys(ctx, userID)
+}
+
+func (s *Service) DeleteAPIKey(ctx context.Context, userID, id int64) error {
+	deleted, err := s.store.DeleteAPIKey(ctx, userID, id)
+	if err != nil {
+		return err
+	}
+	if !deleted {
+		return authError("API Key 不存在", "API_KEY_NOT_FOUND", http.StatusNotFound)
+	}
+	return nil
+}
+
+func hashAPIKeyToken(token string) string {
+	digest := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(digest[:])
+}
+
 func (s *Service) RequestRegistrationCode(ctx context.Context, email, purpose, language string) (VerificationDispatchResult, error) {
 	email = normalizeEmail(email)
 	setup, err := s.store.IsSetupRequired(ctx)
 	if err != nil {
 		return VerificationDispatchResult{}, err
 	}
-	if purpose == "setup" && !setup {
-		return VerificationDispatchResult{}, authError("管理员初始化已完成", "SETUP_ALREADY_COMPLETED", http.StatusConflict)
+	if purpose != "register" && purpose != "reset" {
+		return VerificationDispatchResult{}, authError("邮箱、验证码用途不正确", "INVALID_VERIFICATION_PURPOSE", http.StatusBadRequest)
 	}
 	if purpose == "register" && setup {
 		return VerificationDispatchResult{}, authError("请先完成管理员初始化", "SETUP_REQUIRED", http.StatusConflict)

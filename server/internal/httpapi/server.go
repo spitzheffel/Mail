@@ -162,6 +162,9 @@ func (s *Server) routes() {
 	s.handleIdentity("POST /api/accounts/{id}/send", true, false, s.withRateLimit(s.sendLimit, s.sendMessage))
 	s.handleIdentity("POST /api/oauth/device-code", false, false, s.withRateLimit(s.authLimit, s.deviceCode))
 	s.handleIdentity("POST /api/oauth/poll", false, false, s.withRateLimit(s.authLimit, s.pollDeviceCode))
+	s.handleIdentity("GET /api/api-keys", true, false, s.listAPIKeys)
+	s.handleIdentity("POST /api/api-keys", true, false, s.withRateLimit(s.authLimit, s.createAPIKey))
+	s.handleIdentity("DELETE /api/api-keys/{id}", true, false, s.withRateLimit(s.authLimit, s.deleteAPIKey))
 
 	s.mux.HandleFunc("/", s.serveFrontend)
 }

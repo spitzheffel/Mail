@@ -9,7 +9,7 @@ Do not open a public issue containing credentials, tokens, private messages, exp
 ## Deployment requirements
 
 - Use HTTPS through a trusted reverse proxy.
-- Complete the one-time administrator setup immediately after first deployment.
+- Complete the one-time administrator setup immediately after first deployment, before exposing the instance on a public network. First-run setup trusts whoever can reach the setup page; it does not use email verification.
 - Set `MAIL_SESSION_SECRET`, `MAIL_ENCRYPTION_KEY`, and SMTP credentials through a secret manager.
 - Keep `MAIL_ENCRYPTION_KEY` outside the SQLite data volume.
 - Set `MAIL_TRUST_PROXY=1` only when direct access to the application port is blocked.
@@ -37,4 +37,4 @@ If a mailbox password or refresh token is exposed:
 - No-store API responses and restrictive browser security headers.
 - Per-user/guest external-operation limits and trusted-proxy-aware authentication rate limits.
 - Production startup checks for strong secrets.
-- One-time administrator bootstrap and email-verified registration with five-minute codes.
+- One-time administrator bootstrap (no email code) and email-verified registration/password reset with five-minute codes.

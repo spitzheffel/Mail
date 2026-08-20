@@ -1,7 +1,7 @@
-export type PageRoute = "login" | "inbox" | "compose" | "accounts" | "oauth" | "settings" | "admin" | "users";
+export type PageRoute = "login" | "inbox" | "compose" | "accounts" | "oauth" | "settings" | "admin" | "users" | "api-keys";
 export type FolderRoute = "inbox" | "sent" | "drafts" | "archive" | "trash";
 export type DialogRoute = "import" | null;
-export type MailRouteSegment = "" | FolderRoute | "sendmails" | "accounts" | "import" | "oauth" | "microsoft-oauth" | "settings" | "admin" | "users";
+export type MailRouteSegment = "" | FolderRoute | "sendmails" | "accounts" | "import" | "oauth" | "microsoft-oauth" | "settings" | "admin" | "users" | "api-keys";
 
 export type MailRoute = {
   segment: MailRouteSegment;
@@ -28,6 +28,7 @@ export function routeForSegment(value: string): MailRoute {
   if (segment === "settings") return { segment, page: "settings", folder: null, dialog: null, known: true };
   if (segment === "admin") return { segment, page: "admin", folder: null, dialog: null, known: true };
   if (segment === "users") return { segment, page: "users", folder: null, dialog: null, known: true };
+  if (segment === "api-keys") return { segment, page: "api-keys", folder: null, dialog: null, known: true };
   return { segment: "", page: "inbox", folder: "inbox", dialog: null, known: false };
 }
 

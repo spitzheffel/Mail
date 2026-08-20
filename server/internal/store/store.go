@@ -126,6 +126,17 @@ func (s *Store) initialize(ctx context.Context) error {
 			FOREIGN KEY(announcement_id) REFERENCES announcements(id) ON DELETE CASCADE,
 			FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 		);
+
+		CREATE TABLE IF NOT EXISTS api_keys (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			prefix TEXT NOT NULL,
+			token_hash TEXT NOT NULL UNIQUE,
+			created_at TEXT NOT NULL,
+			last_used_at TEXT,
+			FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+		);
 	`); err != nil {
 		return err
 	}
@@ -187,6 +198,8 @@ func (s *Store) initialize(ctx context.Context) error {
 		CREATE INDEX IF NOT EXISTS idx_mail_operations_expiry ON mail_operations(updated_at);
 		CREATE INDEX IF NOT EXISTS idx_desktop_attachment_uploads_owner ON desktop_attachment_uploads(owner_key, created_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_desktop_attachment_uploads_expiry ON desktop_attachment_uploads(expires_at);
+		CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id, created_at DESC, id DESC);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_token_hash ON api_keys(token_hash);
 	`)
 	if err != nil {
 		return err

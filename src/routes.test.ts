@@ -19,4 +19,13 @@ describe("mail routes", () => {
     });
     expect(mailPath("microsoft-oauth", "/mail/")).toBe("/mail/microsoft-oauth");
   });
+
+  it("keeps API key management on its own admin-group tab", () => {
+    expect(routeForSegment("api-keys")).toMatchObject({
+      segment: "api-keys",
+      page: "api-keys",
+      known: true,
+    });
+    expect(mailPath("api-keys", "/mail/")).toBe("/mail/api-keys");
+  });
 });

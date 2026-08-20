@@ -186,3 +186,59 @@ func TestDisabledAccountRevokesDesktopSessionAndCanRecover(t *testing.T) {
 		t.Fatalf("re-enabled account could not authenticate: user=%v err=%v", authenticated, err)
 	}
 }
+
+func TestInitializeAdministratorDoesNotRequireVerificationCode(t *testing.T) {
+	service, _ := openAuthTestService(t, nil)
+	user, err := service.InitializeAdministrator(context.Background(), "admin", "admin@example.com", "AdminPassword!123")
+	if err != nil || user == nil || !user.IsAdmin {
+		t.Fatalf("administrator setup without a verification code failed: user=%v err=%v", user, err)
+	}
+	if _, err := service.InitializeAdministrator(context.Background(), "other", "other@example.com", "AdminPassword!123"); err == nil {
+		t.Fatal("repeated administrator setup succeeded")
+	}
+	_, purposeErr := service.RequestRegistrationCode(context.Background(), "user@example.com", "setup", "zh")
+	var authErr *Error
+	if !errors.As(purposeErr, &authErr) || authErr.Code != "INVALID_VERIFICATION_PURPOSE" {
+		t.Fatalf("setup verification purpose should be rejected: %#v", purposeErr)
+	}
+}
+
+func TestCreateListAndDeleteAPIKeys(t *testing.T) {
+	service, storage := openAuthTestService(t, nil)
+	user, err := service.BootstrapAdministrator(context.Background(), "admin", "admin@example.com", "AdminPassword!123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.CreateAPIKey(context.Background(), user.ID, "  n8n  ")
+	if err != nil || created == nil || created.Name != "n8n" || !strings.HasPrefix(created.Token, "mlk_") || created.Prefix != created.Token[:12] {
+		t.Fatalf("create API key failed: %#v %v", created, err)
+	}
+	exists, err := storage.APIKeyTokenHashExists(context.Background(), hashAPIKeyToken(created.Token))
+	if err != nil || !exists {
+		t.Fatalf("hashed API key was not stored: exists=%v err=%v", exists, err)
+	}
+	listed, err := service.ListAPIKeys(context.Background(), user.ID)
+	if err != nil || len(listed) != 1 || listed[0].Prefix != created.Prefix {
+		t.Fatalf("list API keys failed: %#v %v", listed, err)
+	}
+	if err := service.DeleteAPIKey(context.Background(), user.ID, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if remaining, err := service.ListAPIKeys(context.Background(), user.ID); err != nil || len(remaining) != 0 {
+		t.Fatalf("deleted API key is still listed: %#v %v", remaining, err)
+	}
+	if err := service.DeleteAPIKey(context.Background(), user.ID, created.ID); err == nil {
+		t.Fatal("deleting a missing key succeeded")
+	}
+	second, err := storage.CreateUser(context.Background(), "other", user.PasswordHash, "other@example.com", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createdOther, err := service.CreateAPIKey(context.Background(), second.ID, "script")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.DeleteAPIKey(context.Background(), user.ID, createdOther.ID); err == nil {
+		t.Fatal("cross-user API key delete succeeded")
+	}
+}

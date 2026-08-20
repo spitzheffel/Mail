@@ -97,6 +97,19 @@ type Announcement struct {
 	Read      bool   `json:"read"`
 }
 
+type APIKey struct {
+	ID         int64   `json:"id"`
+	Name       string  `json:"name"`
+	Prefix     string  `json:"prefix"`
+	CreatedAt  string  `json:"createdAt"`
+	LastUsedAt *string `json:"lastUsedAt"`
+}
+
+type CreatedAPIKey struct {
+	APIKey
+	Token string `json:"token"`
+}
+
 type Identity struct {
 	Kind     string
 	OwnerKey string

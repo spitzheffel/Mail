@@ -139,7 +139,7 @@ npm run dev
 
 打开 [http://localhost:5173](http://localhost:5173)。
 
-使用空数据库首次启动时，Mail 会进入一次性管理员配置页面。请先在 `.env` 中配置验证码 SMTP，然后填写管理员邮箱、显示名称、密码和六位验证码。验证码有效期为五分钟。
+使用空数据库首次启动时，Mail 会进入一次性管理员配置页面。填写用户名、邮箱和至少 12 位密码即可，此步骤不需要邮箱验证码。请在实例对公网开放前完成初始化。注册与找回密码仍需要在 `.env` 中配置验证码 SMTP。登录后可在侧栏 ADMIN 分组中创建和删除 API Key；密钥只显示一次，删除后立即失效且无法恢复，调用邮件接口的能力尚未开放。
 
 ## 环境变量
 
@@ -148,7 +148,7 @@ npm run dev
 | `MAIL_SESSION_SECRET` | 签名登录与游客 Cookie | 必填，至少使用 32 位随机字符 |
 | `MAIL_ENCRYPTION_KEY` | 加密邮箱凭据 | 必填，32 字节 Base64 或 64 位十六进制 |
 | `MAIL_DATA_DIR` | SQLite 与本地数据目录 | 挂载持久且私有的目录 |
-| `MAIL_VERIFICATION_SMTP_HOST` | 验证码 SMTP 地址 | 注册与首次部署必填 |
+| `MAIL_VERIFICATION_SMTP_HOST` | 验证码 SMTP 地址 | 注册与找回密码必填 |
 | `MAIL_VERIFICATION_SMTP_PORT` | 验证码 SMTP 端口 | 通常为 `587` 或 `465` |
 | `MAIL_VERIFICATION_SMTP_SECURE` | 直接 TLS 模式 | 端口 `465` 使用 `1`，否则使用 `0` |
 | `MAIL_VERIFICATION_SMTP_USER` | 验证码 SMTP 用户名 | 作为部署密钥保存 |
@@ -208,6 +208,7 @@ Mail 不会要求用户在应用中输入微软密码。用户在微软验证页
 | `/oauth` | 登录与注册 |
 | `/microsoft-oauth` | 微软邮箱授权 |
 | `/settings` | 系统设置 |
+| `/api-keys` | API 密钥 |
 | `/admin` | 管理员总览 |
 
 部署在 `/mail` 子路径时，对应地址为 `/mail/oauth`、`/mail/inbox`、`/mail/microsoft-oauth` 等。未登录访问 `/mail/` 会自动跳转到 `/mail/oauth`。

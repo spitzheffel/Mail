@@ -57,7 +57,7 @@ func (s *Server) requestVerification(response http.ResponseWriter, request *http
 		return err
 	}
 	body.Email = strings.TrimSpace(body.Email)
-	if !validEmail(body.Email) || len(body.Email) > 254 || (body.Purpose != "setup" && body.Purpose != "register" && body.Purpose != "reset") || (body.Language != "" && body.Language != "zh" && body.Language != "en") {
+	if !validEmail(body.Email) || len(body.Email) > 254 || (body.Purpose != "register" && body.Purpose != "reset") || (body.Language != "" && body.Language != "zh" && body.Language != "en") {
 		return validation("邮箱、验证码用途或语言不正确")
 	}
 	if body.Language == "" {
@@ -79,19 +79,18 @@ func (s *Server) requestVerification(response http.ResponseWriter, request *http
 
 func (s *Server) setupAdministrator(response http.ResponseWriter, request *http.Request) error {
 	var body struct {
-		Username         string `json:"username"`
-		Email            string `json:"email"`
-		Password         string `json:"password"`
-		VerificationCode string `json:"verificationCode"`
+		Username string `json:"username"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 	if err := decodeJSON(response, request, &body); err != nil {
 		return err
 	}
 	body.Username, body.Email = strings.TrimSpace(body.Username), strings.TrimSpace(body.Email)
-	if !validUsername(body.Username) || !validEmail(body.Email) || len(body.Password) < 12 || len(body.Password) > 128 || !regexp.MustCompile(`^\d{6}$`).MatchString(body.VerificationCode) {
+	if !validUsername(body.Username) || !validEmail(body.Email) || len(body.Password) < 12 || len(body.Password) > 128 {
 		return validation("管理员注册信息格式不正确")
 	}
-	user, err := s.auth.InitializeAdministrator(request.Context(), body.Username, body.Email, body.Password, body.VerificationCode)
+	user, err := s.auth.InitializeAdministrator(request.Context(), body.Username, body.Email, body.Password)
 	if err != nil {
 		return err
 	}

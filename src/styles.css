@@ -169,6 +169,7 @@ button { color: inherit; }
 .button.primary { border-color: #18181b; color: #fff; background: #18181b; box-shadow: 0 1px 2px rgba(0,0,0,.18); }
 .dark .button.primary { border-color: #f4f4f5; color: #111; background: #f4f4f5; }
 .button.secondary { background: var(--surface); }
+.button.danger { border-color: #e5484d; color: #fff; background: #e5484d; }
 .button.full { width: 100%; }
 .account-picker { height: 36px; max-width: 240px; padding: 0 30px 0 11px; border: 1px solid var(--border); border-radius: 7px; outline: 0; color: var(--foreground); background: var(--surface); font-size: 11px; }
 
@@ -671,6 +672,19 @@ button { color: inherit; }
 .settings-professional-row p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.65; }
 .settings-professional-row code { margin-top: 5px; color: var(--accent); font-size: 8px; }
 .settings-professional-row.permission { min-height: 92px; align-items: center; }
+.settings-api-keys { display: grid; gap: 12px; padding: 20px; border-top: 1px solid var(--border); }
+.settings-professional-list > .settings-api-keys:first-child { border-top: 0; }
+.settings-api-keys-head { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 14px; align-items: start; }
+.settings-api-keys-head h3 { margin: 0; font-size: 12px; }
+.settings-api-keys-head p { margin: 6px 0 0; color: var(--muted); font-size: 9px; line-height: 1.65; }
+.settings-api-keys-create { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.settings-api-keys-empty { margin: 0; color: var(--muted); font-size: 10px; }
+.settings-api-key-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 0 0; border-top: 1px solid var(--border); }
+.settings-api-key-row > div { display: grid; gap: 4px; }
+.settings-api-key-row strong { font-size: 12px; }
+.settings-api-key-row small { color: var(--muted); font-size: 9px; }
+.settings-api-key-delete-name { display: block; margin: 0 22px 4px; font-size: 12px; }
+.settings-api-key-token { display: block; margin: 0 22px 4px; padding: 12px 14px; border-radius: 8px; background: var(--surface-soft); color: var(--foreground); font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all; }
 
 .account-batch-dialog { width: min(430px, calc(100vw - 32px)); display: grid; gap: 16px; padding: 24px; border: 1px solid var(--border); border-radius: 15px; color: var(--foreground); background: var(--surface); box-shadow: 0 24px 80px rgba(0,0,0,.22); animation: action-sheet-up .18s ease; }
 .account-batch-dialog.compact { width: min(390px, calc(100vw - 32px)); text-align: center; }
@@ -916,6 +930,7 @@ button { color: inherit; }
   .admin-users-table::-webkit-scrollbar { display: none; }
   .settings-professional-row { grid-template-columns: 42px minmax(0, 1fr); }
   .settings-professional-row > .config-status, .settings-professional-row > button { grid-column: 2; justify-self: start; }
+  .settings-api-keys-create { grid-template-columns: 1fr; }
   .oauth-page-head { align-items: flex-start; flex-direction: column; }
   .oauth-steps > div { min-height: 54px; }
   .stats-grid { grid-template-columns: 1fr 1fr; }

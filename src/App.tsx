@@ -57,6 +57,7 @@ import {
 import { AnnouncementDialog } from "./components/AnnouncementDialog";
 import { ComposePage, type ComposeAttachment } from "./components/ComposePage";
 import { ImportDialog } from "./components/ImportDialog";
+import { Modal } from "./components/Modal";
 import { OAuthPage } from "./components/OAuthPage";
 import { SidebarAccounts } from "./components/SidebarAccounts";
 import { useI18n } from "./i18n";
@@ -75,6 +76,7 @@ type CurrentUser = { username: string; administrator: boolean };
 type AdminStats = { users: number; mailboxAccounts: number; activeGuests: number; announcements: number };
 type AdminUserSummary = { id: number; username: string; email: string; administrator: boolean; disabled: boolean; disabledAt: string | null; accountCount: number; createdAt: string };
 type AdminActivityPoint = { date: string; users: number; accounts: number; guests: number; announcements: number };
+type APIKeySummary = { id: number; name: string; prefix: string; createdAt: string; lastUsedAt: string | null };
 type SendDraft = {
 	accountId: number;
 	to: string;
@@ -422,6 +424,7 @@ function App() {
       return;
     }
     if (page === "login") navigateTo("inbox", { replace: true });
+    if (page === "api-keys" && authState !== "authenticated") navigateTo("inbox", { replace: true });
   }, [authState, navigateTo, page]);
 
   const loadAccounts = useCallback(async () => {
@@ -789,11 +792,14 @@ function App() {
           </button>
           <button onClick={() => navigateTo("import")}><Plus size={18} /> {t("导入账号")}</button>
           <button className={page === "oauth" ? "active" : ""} onClick={() => { setOauthAccount(selectedAccount); navigateTo("microsoft-oauth"); }}><KeyRound size={18} /> {t("微软授权")}</button>
-          {currentUser?.administrator && <>
+          {authState === "authenticated" && <>
             <span className="nav-label nav-label-spaced">ADMIN</span>
-            <button className={page === "admin" ? "active" : ""} onClick={() => navigateTo("admin")}><LayoutDashboard size={18} /> {t("管理概览")}</button>
-            <button className={page === "users" ? "active" : ""} onClick={() => navigateTo("users")}><UserCog size={18} /> {t("用户管理")}</button>
-            <button onClick={openAnnouncements}><CircleAlert size={18} /> {t("公告管理")}{announcementUnread > 0 && <em>{announcementUnread}</em>}</button>
+            {currentUser?.administrator && <>
+              <button className={page === "admin" ? "active" : ""} onClick={() => navigateTo("admin")}><LayoutDashboard size={18} /> {t("管理概览")}</button>
+              <button className={page === "users" ? "active" : ""} onClick={() => navigateTo("users")}><UserCog size={18} /> {t("用户管理")}</button>
+              <button onClick={openAnnouncements}><CircleAlert size={18} /> {t("公告管理")}{announcementUnread > 0 && <em>{announcementUnread}</em>}</button>
+            </>}
+            <button className={page === "api-keys" ? "active" : ""} onClick={() => navigateTo("api-keys")}><LockKeyhole size={18} /> {t("API 密钥")}</button>
           </>}
           <span className="nav-label nav-label-spaced">{t("系统")}</span>
           <button className={page === "settings" ? "active" : ""} onClick={() => navigateTo("settings")}>
@@ -939,6 +945,7 @@ function App() {
           )}
           {page === "admin" && currentUser?.administrator && <AdminOverviewPage />}
           {page === "users" && currentUser?.administrator && <AdminUsersPage />}
+          {page === "api-keys" && authState === "authenticated" && <APIKeysPage />}
           {page === "oauth" && (
             <OAuthPage
               accounts={accounts}
@@ -1059,7 +1066,7 @@ function LoginPage({ setupRequired, dark, setDark, onLogin, onGuest }: { setupRe
     try {
       const result = await api<{ retryAfter: number }>("/api/auth/verification/request", {
         method: "POST",
-        body: JSON.stringify({ email, purpose: mode === "setup" ? "setup" : "register", language }),
+        body: JSON.stringify({ email, purpose: "register", language }),
       });
       setResendSeconds(result.retryAfter || 60);
       setNotice(t("验证码已发送，5 分钟内有效"));
@@ -1130,7 +1137,9 @@ function LoginPage({ setupRequired, dark, setDark, onLogin, onGuest }: { setupRe
       const endpoint = mode === "login" ? "/api/auth/login" : mode === "setup" ? "/api/auth/setup" : "/api/auth/register";
       const body = mode === "login"
         ? { email, password }
-        : { username, email, password, verificationCode };
+        : mode === "setup"
+          ? { username, email, password }
+          : { username, email, password, verificationCode };
       const result = await api<{ username: string; administrator?: boolean }>(endpoint, { method: "POST", body: JSON.stringify(body) });
       const user = { username: result.username, administrator: Boolean(result.administrator) };
       if (mode === "setup") onLogin(user); else await beginSuccessTransition(() => onLogin(user));
@@ -1180,10 +1189,10 @@ function LoginPage({ setupRequired, dark, setDark, onLogin, onGuest }: { setupRe
             ? <label className="stack-field"><span>{t("邮箱")}</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder={t("输入邮箱地址")} /></label>
             : <><label className="stack-field"><span>{t("用户名")}</span><input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" placeholder={t("3-32 位字母、数字或下划线")} /></label><label className="stack-field"><span>{t("邮箱")}</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="name@example.com" /></label></>}
           <label className="stack-field"><span>{t("密码")}</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={mode === "setup" ? t("管理员密码至少 12 位") : mode === "register" ? t("至少 8 位密码") : t("输入密码")} autoComplete={mode === "login" ? "current-password" : "new-password"} /></label>
-          {mode !== "login" && <label className="stack-field"><span>{t("验证码")}</span><div className="verification-control"><input value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" placeholder={t("6 位验证码")} /><button type="button" disabled={!email || sendingCode || resendSeconds > 0} onClick={sendVerificationCode}>{sendingCode ? t("发送中…") : resendSeconds > 0 ? t("{seconds} 秒后重发", { seconds: resendSeconds }) : t("发送验证码")}</button></div></label>}
+          {mode === "register" && <label className="stack-field"><span>{t("验证码")}</span><div className="verification-control"><input value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" placeholder={t("6 位验证码")} /><button type="button" disabled={!email || sendingCode || resendSeconds > 0} onClick={sendVerificationCode}>{sendingCode ? t("发送中…") : resendSeconds > 0 ? t("{seconds} 秒后重发", { seconds: resendSeconds }) : t("发送验证码")}</button></div></label>}
           {notice && <div className="login-notice"><CheckCircle2 size={15} />{notice}</div>}
           {error && <div className="login-error"><CircleAlert size={15} />{error}</div>}
-          <button className="button primary full login-submit" disabled={(mode === "login" ? !email : !username || !email || verificationCode.length !== 6) || !password || loading || successTransition}><LockKeyhole size={16} />{loading ? t("处理中…") : mode === "setup" ? t("完成管理员配置") : mode === "login" ? t("登录 Mail") : t("创建账号")}</button>
+          <button className="button primary full login-submit" disabled={(mode === "login" ? !email : !username || !email || (mode === "register" && verificationCode.length !== 6)) || !password || loading || successTransition}><LockKeyhole size={16} />{loading ? t("处理中…") : mode === "setup" ? t("完成管理员配置") : mode === "login" ? t("登录 Mail") : t("创建账号")}</button>
         </form>
         {!setupRequired && mode === "login" && <><div className="guest-divider"><span>{t("或者")}</span></div><button className="button secondary full guest-button" disabled={loading || successTransition} onClick={enterGuest}><UserRound size={16} /> {t("以游客模式继续")}</button></>}
       </section>
@@ -1958,6 +1967,111 @@ function SettingsPage({ authorize }: { authorize: () => void }) {
         <div className="settings-professional-row"><span className="settings-icon green"><Cloud size={20} /></span><div><h3>{t("微软邮件连接")}</h3><p>{t("收件使用 IMAP XOAUTH2，发件使用 SMTP OAuth2，不启用过时的基本认证。")}</p><code>IMAP 993 · SMTP 587</code></div><span className="config-status">OAuth2</span></div>
         <div className="settings-professional-row permission"><span className="settings-icon purple"><KeyRound size={20} /></span><div><h3>{t("发件权限说明")}</h3><p>{t("从部分旧工具取得的令牌仅包含 IMAP 权限，能够收件但不能发件。使用内置授权工具重新申请令牌时，会同时请求 IMAP、SMTP、Graph 和离线刷新权限。")}</p></div><button className="button secondary" onClick={authorize}>{t("重新授权")}</button></div>
       </div>
+    </section>
+  );
+}
+
+function APIKeysPage() {
+  const { language, t } = useI18n();
+  const [keys, setKeys] = useState<APIKeySummary[]>([]);
+  const [name, setName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<APIKeySummary | null>(null);
+  const [createdToken, setCreatedToken] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const loadKeys = useCallback(() => {
+    setLoading(true);
+    api<{ keys: APIKeySummary[] }>("/api/api-keys")
+      .then((result) => setKeys(result.keys || []))
+      .catch((reason) => setError(reason instanceof Error ? reason.message : t("无法读取 API Key")))
+      .finally(() => setLoading(false));
+  }, [t]);
+
+  useEffect(() => { loadKeys(); }, [loadKeys]);
+
+  const createKey = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setCreating(true);
+    setError("");
+    try {
+      const created = await api<APIKeySummary & { token: string }>("/api/api-keys", { method: "POST", body: JSON.stringify({ name }) });
+      setName("");
+      setCreatedToken(created.token);
+      setCopied(false);
+      setKeys((current) => [{ id: created.id, name: created.name, prefix: created.prefix, createdAt: created.createdAt, lastUsedAt: created.lastUsedAt }, ...current]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : t("无法创建 API Key"));
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const deleteKey = async () => {
+    if (!pendingDelete) return;
+    const id = pendingDelete.id;
+    setDeletingId(id);
+    setError("");
+    try {
+      await api(`/api/api-keys/${id}`, { method: "DELETE" });
+      setKeys((current) => current.filter((key) => key.id !== id));
+      setPendingDelete(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : t("无法删除 API Key"));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const copyToken = async () => {
+    if (!createdToken) return;
+    await copyPlainText(createdToken);
+    setCopied(true);
+  };
+
+  return (
+    <section className="admin-professional-page">
+      <header className="accounts-professional-head"><div><h1>{t("API 密钥")}</h1><p>{t("密钥只显示一次。当前用于后续脚本访问，尚未开放接口调用。")}</p></div></header>
+      <div className="settings-professional-list">
+        <div className="settings-api-keys">
+          <form className="settings-api-keys-create" onSubmit={createKey}>
+            <label className="stack-field"><span>{t("密钥名称")}</span><input value={name} onChange={(event) => setName(event.target.value.slice(0, 64))} placeholder={t("例如 n8n")} autoComplete="off" /></label>
+            <button className="button primary" disabled={!name.trim() || creating} type="submit">{creating ? t("处理中…") : t("创建密钥")}</button>
+          </form>
+          {error && <div className="login-error"><CircleAlert size={15} />{error}</div>}
+          {loading && keys.length === 0 ? <p className="settings-api-keys-empty">{t("正在加载…")}</p> : keys.length === 0 ? <p className="settings-api-keys-empty">{t("还没有 API Key")}</p> : keys.map((key) => (
+            <div className="settings-api-key-row" key={key.id}>
+              <div>
+                <strong>{key.name}</strong>
+                <small>{key.prefix}… · {formatDate(key.createdAt, true, language === "en" ? "en-US" : "zh-CN")}</small>
+              </div>
+              <button className="button secondary" disabled={deletingId === key.id} onClick={() => setPendingDelete(key)}>{deletingId === key.id ? t("处理中…") : t("删除")}</button>
+            </div>
+          ))}
+        </div>
+      </div>
+      <Modal open={Boolean(createdToken)} onClose={() => setCreatedToken(null)} title={t("请保存此 API Key")} description={t("关闭后将无法再次查看完整密钥。")}>
+        <code className="settings-api-key-token">{createdToken}</code>
+        <div className="modal-footer">
+          <button className="button secondary" onClick={() => void copyToken()}>{copied ? <Check size={16} /> : <Copy size={16} />} {t(copied ? "已复制" : "复制密钥")}</button>
+          <button className="button primary" onClick={() => setCreatedToken(null)}>{t("我已保存")}</button>
+        </div>
+      </Modal>
+      <Modal
+        open={Boolean(pendingDelete)}
+        onClose={() => { if (deletingId === null) setPendingDelete(null); }}
+        title={t("删除 API 密钥")}
+        description={t("删除后该密钥立即失效且无法恢复，使用它的脚本会调用失败。")}
+      >
+        <strong className="settings-api-key-delete-name">{pendingDelete?.name}</strong>
+        <div className="modal-footer">
+          <button className="button secondary" disabled={deletingId !== null} onClick={() => setPendingDelete(null)}>{t("取消")}</button>
+          <button className="button danger" disabled={deletingId !== null} onClick={() => void deleteKey()}>{deletingId !== null ? t("处理中…") : t("删除")}</button>
+        </div>
+      </Modal>
     </section>
   );
 }

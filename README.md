@@ -144,7 +144,7 @@ npm run dev
 
 Open [http://localhost:5173](http://localhost:5173).
 
-On a fresh database, Mail opens a one-time administrator setup screen. Configure the verification SMTP variables in `.env`, then enter the administrator email, display name, password, and six-digit verification code. Codes expire after five minutes.
+On a fresh database, Mail opens a one-time administrator setup screen. Enter a username, email, and password (at least 12 characters). Email verification codes are not required for this step; complete setup before exposing the instance on a public network. Configure the verification SMTP variables in `.env` before enabling registration or password reset. Signed-in users can create and delete API keys at `/api-keys`. The secret is shown only once and deleting a key takes effect immediately without any way to restore it; using a key to call mail APIs is not enabled yet.
 
 ## Configuration
 
@@ -153,7 +153,7 @@ On a fresh database, Mail opens a one-time administrator setup screen. Configure
 | `MAIL_SESSION_SECRET` | Signs login and guest cookies | Required; use at least 32 random characters |
 | `MAIL_ENCRYPTION_KEY` | Encrypts stored mailbox credentials | Required; 32-byte Base64 or 64-character hex |
 | `MAIL_DATA_DIR` | SQLite and local data directory | Mount a persistent, private directory |
-| `MAIL_VERIFICATION_SMTP_HOST` | Verification email SMTP host | Required for registration and first-run setup |
+| `MAIL_VERIFICATION_SMTP_HOST` | Verification email SMTP host | Required for registration and password reset |
 | `MAIL_VERIFICATION_SMTP_PORT` | Verification SMTP port | Usually `587` or `465` |
 | `MAIL_VERIFICATION_SMTP_SECURE` | Direct TLS mode | Use `1` for port `465`, otherwise `0` |
 | `MAIL_VERIFICATION_SMTP_USER` | Verification SMTP username | Store as a deployment secret |
@@ -213,6 +213,7 @@ Stable English paths support direct access, refresh, and browser history:
 | `/oauth` | Sign-in and registration |
 | `/microsoft-oauth` | Microsoft mailbox authorization |
 | `/settings` | System settings |
+| `/api-keys` | API keys |
 | `/admin` | Administrator overview |
 
 When deployed below `/mail`, the same routes become `/mail/oauth`, `/mail/inbox`, and `/mail/microsoft-oauth`. Signed-out visits to `/mail/` are redirected to `/mail/oauth`.
