@@ -139,7 +139,7 @@ npm run dev
 
 打开 [http://localhost:5173](http://localhost:5173)。
 
-使用空数据库首次启动时，Mail 会进入一次性管理员配置页面。填写用户名、邮箱和至少 12 位密码即可，此步骤不需要邮箱验证码。请在实例对公网开放前完成初始化。注册与找回密码仍需要在 `.env` 中配置验证码 SMTP。登录后可在侧栏 ADMIN 分组中创建和删除 API Key；密钥只显示一次，删除后立即失效且无法恢复，调用邮件接口的能力尚未开放。
+使用空数据库首次启动时，Mail 会进入一次性管理员配置页面。填写用户名、邮箱和至少 12 位密码即可，此步骤不需要邮箱验证码。请在实例对公网开放前完成初始化。注册与找回密码仍需要在 `.env` 中配置验证码 SMTP。登录后可在侧栏 ADMIN 分组中创建和删除 API Key；密钥只显示一次，删除后立即失效且无法恢复。脚本只能用 `Authorization: Bearer mlk_...` 调用 `/api/v1/keys/*`，不能访问 Cookie 网页接口或桌面接口。
 
 ## 环境变量
 
@@ -190,6 +190,21 @@ offline_access
 ```
 
 Mail 不会要求用户在应用中输入微软密码。用户在微软验证页面完成授权后，得到的 Token 会在本地加密保存。
+
+## 脚本接口（`/api/v1/keys`）
+
+API Key 只能用 `Authorization: Bearer mlk_...` 访问这一组路径。请先把脚本池账号分到同一个分组（例如 `register-pool`）。占用记录的是 `(账号, platform)`，不会写在账号表上。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/keys/capabilities` | `{ "version": 1, "scopes": ["inbox.lease", "mail.read"] }` |
+| `POST` | `/api/v1/keys/inboxes/lease` | 正文 `{ "group", "platform" }`。返回 `leaseId`、`email`、`expiresAt`（30 分钟）。池空时 `409` |
+| `GET` | `/api/v1/keys/inboxes/{leaseId}/messages` | 收件箱列表：`id`、`from`、`subject`、`receivedAt` |
+| `GET` | `/api/v1/keys/inboxes/{leaseId}/messages/{id}` | 邮件正文：`text`、`html` |
+| `POST` | `/api/v1/keys/inboxes/{leaseId}/success` | 保留该 `(邮箱, platform)` 占用，同一平台下次不会再领到这封 |
+| `POST` | `/api/v1/keys/inboxes/{leaseId}/release` | 可选 `{ "reason" }`。只解除当前 platform 占用，邮箱回到该平台的池 |
+
+领邮箱时即占用该 platform。成功则保持占用；失败 release 或租约超时只解开这一个 platform。同一封邮箱可以同时租给 `trae` 和 `cursor`。
 
 ## 页面路径
 

@@ -200,6 +200,26 @@ func (s *Store) initialize(ctx context.Context) error {
 		CREATE INDEX IF NOT EXISTS idx_desktop_attachment_uploads_expiry ON desktop_attachment_uploads(expires_at);
 		CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id, created_at DESC, id DESC);
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_token_hash ON api_keys(token_hash);
+
+		CREATE TABLE IF NOT EXISTS inbox_occupancies (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			lease_id TEXT NOT NULL UNIQUE,
+			user_id INTEGER NOT NULL,
+			api_key_id INTEGER,
+			account_id INTEGER NOT NULL,
+			platform TEXT NOT NULL,
+			group_name TEXT NOT NULL,
+			status TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			expires_at TEXT,
+			FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY(api_key_id) REFERENCES api_keys(id) ON DELETE SET NULL,
+			FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_occupancies_active ON inbox_occupancies(account_id, platform) WHERE status IN ('leased', 'occupied');
+		CREATE INDEX IF NOT EXISTS idx_inbox_occupancies_lease ON inbox_occupancies(lease_id);
+		CREATE INDEX IF NOT EXISTS idx_inbox_occupancies_key ON inbox_occupancies(api_key_id, status);
 	`)
 	if err != nil {
 		return err

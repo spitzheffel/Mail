@@ -208,6 +208,33 @@ func (s *Service) CreateAPIKey(ctx context.Context, userID int64, name string) (
 	return &model.CreatedAPIKey{APIKey: *record, Token: token}, nil
 }
 
+func (s *Service) APIKeyIdentity(ctx context.Context, request *http.Request) (*model.Identity, int64, error) {
+	authorization := strings.TrimSpace(request.Header.Get("Authorization"))
+	if !strings.HasPrefix(authorization, "Bearer ") {
+		return nil, 0, authError("请使用 API Key", "API_KEY_REQUIRED", http.StatusUnauthorized)
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
+	if !strings.HasPrefix(token, apiKeyTokenPrefix) || len(token) < apiKeyDisplayPrefixLen {
+		return nil, 0, authError("API Key 无效", "API_KEY_INVALID", http.StatusUnauthorized)
+	}
+	record, err := s.store.FindAPIKeyByTokenHash(ctx, hashAPIKeyToken(token))
+	if err != nil {
+		return nil, 0, err
+	}
+	if record == nil {
+		return nil, 0, authError("API Key 无效", "API_KEY_INVALID", http.StatusUnauthorized)
+	}
+	if record.DisabledAt != nil {
+		return nil, 0, authError("账号已停用", "ACCOUNT_DISABLED", http.StatusForbidden)
+	}
+	_ = s.store.TouchAPIKeyLastUsed(ctx, record.KeyID)
+	identity := &model.Identity{
+		Kind: "user", OwnerKey: "user:" + strconv.FormatInt(record.UserID, 10),
+		UserID: record.UserID, Username: record.Username, IsAdmin: record.IsAdmin,
+	}
+	return identity, record.KeyID, nil
+}
+
 func (s *Service) ListAPIKeys(ctx context.Context, userID int64) ([]model.APIKey, error) {
 	return s.store.ListAPIKeys(ctx, userID)
 }
@@ -374,7 +401,11 @@ func (s *Service) DesktopIdentity(ctx context.Context, request *http.Request) (*
 	if !strings.HasPrefix(authorization, "Bearer ") {
 		return nil, "", authError("请重新登录", "DESKTOP_ACCESS_REQUIRED", http.StatusUnauthorized)
 	}
-	claims, valid := s.readDesktopAccessToken(strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer ")))
+	token := strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
+	if strings.HasPrefix(token, apiKeyTokenPrefix) {
+		return nil, "", authError("请重新登录", "DESKTOP_ACCESS_REQUIRED", http.StatusUnauthorized)
+	}
+	claims, valid := s.readDesktopAccessToken(token)
 	if !valid || claims.ExpiresAt <= time.Now().Unix() {
 		return nil, "", authError("登录状态已过期，请刷新会话", "DESKTOP_ACCESS_EXPIRED", http.StatusUnauthorized)
 	}

@@ -60,7 +60,16 @@ func (s *Store) ListAPIKeys(ctx context.Context, userID int64) ([]model.APIKey, 
 }
 
 func (s *Store) DeleteAPIKey(ctx context.Context, userID, id int64) (bool, error) {
-	result, err := s.db.ExecContext(ctx, "DELETE FROM api_keys WHERE id=? AND user_id=?", id, userID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `UPDATE inbox_occupancies SET status=?, updated_at=?
+		WHERE api_key_id=? AND status=?`, model.InboxOccupancyReleased, nowISO(), id, model.InboxOccupancyLeased); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, "DELETE FROM api_keys WHERE id=? AND user_id=?", id, userID)
 	if err != nil {
 		return false, err
 	}
@@ -68,7 +77,41 @@ func (s *Store) DeleteAPIKey(ctx context.Context, userID, id int64) (bool, error
 	if err != nil {
 		return false, err
 	}
-	return deleted == 1, nil
+	if deleted != 1 {
+		return false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+type APIKeyAuth struct {
+	KeyID      int64
+	UserID     int64
+	Username   string
+	IsAdmin    bool
+	DisabledAt *string
+}
+
+func (s *Store) FindAPIKeyByTokenHash(ctx context.Context, tokenHash string) (*APIKeyAuth, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT k.id, k.user_id, u.username, u.is_admin, u.disabled_at
+		FROM api_keys k JOIN users u ON u.id = k.user_id WHERE k.token_hash=?`, tokenHash)
+	var auth APIKeyAuth
+	var isAdmin int
+	if err := row.Scan(&auth.KeyID, &auth.UserID, &auth.Username, &isAdmin, &auth.DisabledAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	auth.IsAdmin = isAdmin != 0
+	return &auth, nil
+}
+
+func (s *Store) TouchAPIKeyLastUsed(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE api_keys SET last_used_at=? WHERE id=?", nowISO(), id)
+	return err
 }
 
 func (s *Store) APIKeyTokenHashExists(ctx context.Context, tokenHash string) (bool, error) {

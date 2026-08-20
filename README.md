@@ -144,7 +144,7 @@ npm run dev
 
 Open [http://localhost:5173](http://localhost:5173).
 
-On a fresh database, Mail opens a one-time administrator setup screen. Enter a username, email, and password (at least 12 characters). Email verification codes are not required for this step; complete setup before exposing the instance on a public network. Configure the verification SMTP variables in `.env` before enabling registration or password reset. Signed-in users can create and delete API keys at `/api-keys`. The secret is shown only once and deleting a key takes effect immediately without any way to restore it; using a key to call mail APIs is not enabled yet.
+On a fresh database, Mail opens a one-time administrator setup screen. Enter a username, email, and password (at least 12 characters). Email verification codes are not required for this step; complete setup before exposing the instance on a public network. Configure the verification SMTP variables in `.env` before enabling registration or password reset. Signed-in users can create and delete API keys at `/api-keys`. The secret is shown only once and deleting a key takes effect immediately without any way to restore it. Script access uses `Authorization: Bearer mlk_...` against `/api/v1/keys/*` only; cookie and desktop session APIs do not accept API keys.
 
 ## Configuration
 
@@ -195,6 +195,21 @@ offline_access
 ```
 
 Mail never asks the user to enter a Microsoft password. The user completes authorization on Microsoft's verification page, and the resulting token is encrypted locally.
+
+## Script API (`/api/v1/keys`)
+
+API keys authenticate only this prefix with `Authorization: Bearer mlk_...`. Put script mailboxes in an account group (for example `register-pool`) first. Occupancy is stored as `(account, platform)`, not on the account row.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/keys/capabilities` | `{ "version": 1, "scopes": ["inbox.lease", "mail.read"] }` |
+| `POST` | `/api/v1/keys/inboxes/lease` | Body `{ "group", "platform" }`. Returns `leaseId`, `email`, `expiresAt` (30 minutes). `409` if the pool is empty |
+| `GET` | `/api/v1/keys/inboxes/{leaseId}/messages` | Inbox list: `id`, `from`, `subject`, `receivedAt` |
+| `GET` | `/api/v1/keys/inboxes/{leaseId}/messages/{id}` | Inbox body: `text`, `html` |
+| `POST` | `/api/v1/keys/inboxes/{leaseId}/success` | Keep `(mailbox, platform)` occupied so the same platform will not receive that address again |
+| `POST` | `/api/v1/keys/inboxes/{leaseId}/release` | Optional `{ "reason" }`. Free this platform occupancy so the address can be leased again |
+
+A lease starts occupied for that platform immediately. Success keeps the lock; release or TTL expiry unlocks only that platform. The same mailbox can be leased to `trae` and `cursor` at the same time.
 
 ## Browser routes
 

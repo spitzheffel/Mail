@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -240,5 +241,26 @@ func TestCreateListAndDeleteAPIKeys(t *testing.T) {
 	}
 	if err := service.DeleteAPIKey(context.Background(), user.ID, createdOther.ID); err == nil {
 		t.Fatal("cross-user API key delete succeeded")
+	}
+}
+
+func TestAPIKeyIdentityAcceptsBearerAndRejectsMissing(t *testing.T) {
+	service, _ := openAuthTestService(t, nil)
+	user, err := service.BootstrapAdministrator(context.Background(), "admin", "admin@example.com", "AdminPassword!123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.CreateAPIKey(context.Background(), user.ID, "script")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, _ := http.NewRequest(http.MethodGet, "http://example.invalid/api/v1/keys/capabilities", nil)
+	if _, _, err := service.APIKeyIdentity(context.Background(), request); err == nil {
+		t.Fatal("missing bearer succeeded")
+	}
+	request.Header.Set("Authorization", "Bearer "+created.Token)
+	identity, keyID, err := service.APIKeyIdentity(context.Background(), request)
+	if err != nil || identity == nil || identity.UserID != user.ID || keyID != created.ID {
+		t.Fatalf("API key identity failed: %#v %d %v", identity, keyID, err)
 	}
 }

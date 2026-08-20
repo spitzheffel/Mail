@@ -31,6 +31,7 @@ type handler func(http.ResponseWriter, *http.Request) error
 type identityKey struct{}
 type requestIDKey struct{}
 type desktopSessionKey struct{}
+type apiKeyIDKey struct{}
 
 type rateRecord struct {
 	Count   int
@@ -165,6 +166,12 @@ func (s *Server) routes() {
 	s.handleIdentity("GET /api/api-keys", true, false, s.listAPIKeys)
 	s.handleIdentity("POST /api/api-keys", true, false, s.withRateLimit(s.authLimit, s.createAPIKey))
 	s.handleIdentity("DELETE /api/api-keys/{id}", true, false, s.withRateLimit(s.authLimit, s.deleteAPIKey))
+	s.handleAPIKey("GET /api/v1/keys/capabilities", s.scriptAPICapabilities)
+	s.handleAPIKey("POST /api/v1/keys/inboxes/lease", s.withRateLimit(s.authLimit, s.leaseScriptInbox))
+	s.handleAPIKey("GET /api/v1/keys/inboxes/{leaseId}/messages", s.listScriptInboxMessages)
+	s.handleAPIKey("GET /api/v1/keys/inboxes/{leaseId}/messages/{id}", s.getScriptInboxMessage)
+	s.handleAPIKey("POST /api/v1/keys/inboxes/{leaseId}/success", s.withRateLimit(s.authLimit, s.completeScriptInboxLease))
+	s.handleAPIKey("POST /api/v1/keys/inboxes/{leaseId}/release", s.withRateLimit(s.authLimit, s.releaseScriptInboxLease))
 
 	s.mux.HandleFunc("/", s.serveFrontend)
 }
@@ -199,7 +206,9 @@ func (s *Server) handleIdentity(pattern string, userOnly, administrator bool, ne
 			return err
 		}
 		var desktopSessionID string
-		if identity == nil && strings.HasPrefix(strings.TrimSpace(request.Header.Get("Authorization")), "Bearer ") {
+		authorization := strings.TrimSpace(request.Header.Get("Authorization"))
+		token := strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
+		if identity == nil && strings.HasPrefix(authorization, "Bearer ") && !strings.HasPrefix(token, "mlk_") {
 			identity, desktopSessionID, err = s.auth.DesktopIdentity(request.Context(), request)
 			if err != nil {
 				return err
@@ -220,6 +229,18 @@ func (s *Server) handleIdentity(pattern string, userOnly, administrator bool, ne
 		}
 		request = request.WithContext(ctx)
 		return next(response, request)
+	})
+}
+
+func (s *Server) handleAPIKey(pattern string, next handler) {
+	s.handle(pattern, func(response http.ResponseWriter, request *http.Request) error {
+		identity, keyID, err := s.auth.APIKeyIdentity(request.Context(), request)
+		if err != nil {
+			return err
+		}
+		ctx := context.WithValue(request.Context(), identityKey{}, identity)
+		ctx = context.WithValue(ctx, apiKeyIDKey{}, keyID)
+		return next(response, request.WithContext(ctx))
 	})
 }
 
@@ -401,6 +422,11 @@ func requestIDFrom(request *http.Request) string {
 func desktopSessionIDFrom(request *http.Request) string {
 	sessionID, _ := request.Context().Value(desktopSessionKey{}).(string)
 	return sessionID
+}
+
+func apiKeyIDFrom(request *http.Request) int64 {
+	id, _ := request.Context().Value(apiKeyIDKey{}).(int64)
+	return id
 }
 
 func validRequestID(value string) bool {

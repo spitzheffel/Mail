@@ -110,6 +110,27 @@ type CreatedAPIKey struct {
 	Token string `json:"token"`
 }
 
+type InboxOccupancy struct {
+	ID        int64
+	LeaseID   string
+	UserID    int64
+	APIKeyID  *int64
+	AccountID int64
+	Platform  string
+	GroupName string
+	Status    string
+	CreatedAt string
+	UpdatedAt string
+	ExpiresAt *string
+	Email     string
+}
+
+const (
+	InboxOccupancyLeased   = "leased"
+	InboxOccupancyOccupied = "occupied"
+	InboxOccupancyReleased = "released"
+)
+
 type Identity struct {
 	Kind     string
 	OwnerKey string

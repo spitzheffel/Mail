@@ -313,4 +313,92 @@ func TestAPIKeyPersistenceIsolationAndLimit(t *testing.T) {
 	}
 }
 
+func TestInboxOccupancyLeasePlatformIsolationAndTTL(t *testing.T) {
+	storage := openTestStore(t)
+	ctx := context.Background()
+	alpha, err := storage.CreateUser(ctx, "alpha", "hash", "alpha@example.com", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beta, err := storage.CreateUser(ctx, "beta", "hash", "beta@example.com", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := "user:" + fmt.Sprint(alpha.ID)
+	if _, err := storage.ImportAccounts(ctx, owner, []model.ImportedAccount{
+		{Email: "one@example.invalid", Password: "p1", ClientID: "c1", RefreshToken: "refresh-token-long-1"},
+		{Email: "two@example.invalid", Password: "p2", ClientID: "c2", RefreshToken: "refresh-token-long-2"},
+	}, "skip"); err != nil {
+		t.Fatal(err)
+	}
+	accounts, err := storage.ListAccounts(ctx, owner)
+	if err != nil || len(accounts) != 2 {
+		t.Fatalf("import accounts: %#v %v", accounts, err)
+	}
+	ids := []int64{accounts[0].ID, accounts[1].ID}
+	if ok, err := storage.SetAccountsGroup(ctx, owner, ids, "register-pool"); err != nil || !ok {
+		t.Fatalf("set group: %v %v", ok, err)
+	}
+	alphaKey, err := storage.InsertAPIKey(ctx, alpha.ID, "script", "mlk_alphaaaaa", strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	betaKey, err := storage.InsertAPIKey(ctx, beta.ID, "script", "mlk_betabbbbbb", strings.Repeat("b", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	trae, err := storage.LeaseInbox(ctx, alpha.ID, alphaKey.ID, "register-pool", "trae")
+	if err != nil || trae == nil || trae.Email == "" || trae.Status != model.InboxOccupancyLeased {
+		t.Fatalf("lease trae: %#v %v", trae, err)
+	}
+	cursor, err := storage.LeaseInbox(ctx, alpha.ID, alphaKey.ID, "register-pool", "cursor")
+	if err != nil || cursor == nil || cursor.AccountID != trae.AccountID {
+		t.Fatalf("same account should lease to another platform: %#v %#v %v", trae, cursor, err)
+	}
+
+	if _, err := storage.CompleteInboxLease(ctx, betaKey.ID, trae.LeaseID); !errors.Is(err, ErrInboxLeaseNotFound) {
+		t.Fatalf("cross-key success: %v", err)
+	}
+	if _, err := storage.CompleteInboxLease(ctx, alphaKey.ID, trae.LeaseID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.LeaseInbox(ctx, alpha.ID, alphaKey.ID, "register-pool", "trae"); err != nil {
+		t.Fatal(err)
+	}
+
+	released, err := storage.ReleaseInboxLease(ctx, alphaKey.ID, cursor.LeaseID)
+	if err != nil || released.Status != model.InboxOccupancyReleased {
+		t.Fatalf("release: %#v %v", released, err)
+	}
+	reused, err := storage.LeaseInbox(ctx, alpha.ID, alphaKey.ID, "register-pool", "cursor")
+	if err != nil || reused.AccountID != cursor.AccountID {
+		t.Fatalf("released platform should return to pool: %#v %#v %v", cursor, reused, err)
+	}
+
+	if _, err := storage.DB().Exec(`UPDATE inbox_occupancies SET expires_at=? WHERE lease_id=?`, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano), reused.LeaseID); err != nil {
+		t.Fatal(err)
+	}
+	afterTTL, err := storage.LeaseInbox(ctx, alpha.ID, alphaKey.ID, "register-pool", "cursor")
+	if err != nil || afterTTL.AccountID != reused.AccountID {
+		t.Fatalf("expired lease should return to pool: %#v %#v %v", reused, afterTTL, err)
+	}
+
+	occupied, err := storage.CompleteInboxLease(ctx, alphaKey.ID, afterTTL.LeaseID)
+	if err != nil || occupied.Status != model.InboxOccupancyOccupied {
+		t.Fatalf("success: %#v %v", occupied, err)
+	}
+	if _, err := storage.DeleteAPIKey(ctx, alpha.ID, alphaKey.ID); err != nil {
+		t.Fatal(err)
+	}
+	var apiKeyID sql.NullInt64
+	var status string
+	if err := storage.DB().QueryRow(`SELECT api_key_id,status FROM inbox_occupancies WHERE lease_id=?`, occupied.LeaseID).Scan(&apiKeyID, &status); err != nil {
+		t.Fatal(err)
+	}
+	if apiKeyID.Valid || status != model.InboxOccupancyOccupied {
+		t.Fatalf("occupied row should survive key delete: api_key_id=%v status=%s", apiKeyID, status)
+	}
+}
+
 func nowTime() time.Time { return time.Now().UTC() }
