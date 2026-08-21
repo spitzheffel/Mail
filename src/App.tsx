@@ -925,6 +925,7 @@ function App() {
               toggleFlag={() => void toggleSelectedMessageFlag()}
               reload={loadMessages}
               openImport={() => navigateTo("import")}
+              selectAccount={selectSidebarAccount}
               fontScale={mailFontScale}
               setFontScale={setMailFontScale}
               page={mailPage}
@@ -1233,6 +1234,7 @@ function InboxPage(props: {
   toggleFlag: () => void;
   reload: () => void;
   openImport: () => void;
+  selectAccount: (accountId: number) => void;
   fontScale: number;
   setFontScale: (value: number | ((current: number) => number)) => void;
   page: number;
@@ -1254,6 +1256,7 @@ function InboxPage(props: {
   const resizeRef = useRef<{ startX: number; startWidth: number; currentWidth: number } | null>(null);
   const [resizingMailLayout, setResizingMailLayout] = useState(false);
   const [mailboxCopied, setMailboxCopied] = useState(false);
+  const [mailboxMenuOpen, setMailboxMenuOpen] = useState(false);
   const mailboxCopyTimerRef = useRef<number | null>(null);
   const [mailListWidth, setMailListWidth] = useState(() => {
     const stored = Number(localStorage.getItem("mail-list-column-width"));
@@ -1400,7 +1403,7 @@ function InboxPage(props: {
   return (
     <section ref={mailPanelRef} className={`mail-panel ${resizingMailLayout ? "resizing" : ""}`} style={{ "--mail-primary-size": `${(12.6 * props.fontScale).toFixed(1)}px`, "--mail-time-size": `${(10.8 * props.fontScale).toFixed(1)}px`, "--mail-secondary-size": `${(11.4 * props.fontScale).toFixed(1)}px`, "--mail-row-height": `${Math.round(54 * props.fontScale)}px`, "--mail-row-padding": `${Math.round(7 * props.fontScale)}px`, "--mail-list-width": `${mailListWidth}px` } as React.CSSProperties}>
         <div className="message-column" ref={messageColumnRef}>
-          <div className="column-head"><div className="column-title"><strong>{t("邮件列表")}</strong><span className="column-mailbox-meta"><span title={props.account?.email}>{props.account?.email}</span><button type="button" className={mailboxCopied ? "copied" : ""} onClick={() => void copyCurrentMailbox()} aria-label={t(mailboxCopied ? "已复制邮箱" : "复制邮箱")} title={t(mailboxCopied ? "已复制邮箱" : "复制邮箱")}>{mailboxCopied ? <Check size={13} /> : <Copy size={13} />}</button><em>{props.total + props.pendingSends.length} {t("封邮件")}</em></span></div><div className="column-actions"><button disabled={props.fontScale <= 0.9} onClick={() => props.setFontScale((value) => Math.max(0.9, Number((value - 0.1).toFixed(1))))} aria-label={t("减小邮件列表字号")}><Minus size={15} /></button><span className="font-scale-label">{Math.round(props.fontScale * 100)}%</span><button disabled={props.fontScale >= 1.4} onClick={() => props.setFontScale((value) => Math.min(1.4, Number((value + 0.1).toFixed(1))))} aria-label={t("增大邮件列表字号")}><Plus size={15} /></button><button onClick={props.reload} aria-label={t("同步")}><RefreshCw size={16} /></button></div></div>
+          <div className="column-head"><div className="column-title"><strong>{t("邮件列表")}</strong><span className="column-mailbox-meta"><span className="mailbox-switch"><button type="button" className="mailbox-switch-trigger" aria-haspopup="listbox" aria-expanded={mailboxMenuOpen} title={props.account?.email} onClick={() => setMailboxMenuOpen((open) => !open)}><span>{props.account?.email}</span><ChevronDown size={12} /></button>{mailboxMenuOpen && <><button type="button" className="mailbox-switch-dismiss" aria-label={t("关闭")} onClick={() => setMailboxMenuOpen(false)} /><div className="mailbox-switch-options" role="listbox">{props.accounts.map((account) => <button type="button" role="option" aria-selected={account.id === props.account?.id} key={account.id} onClick={() => { setMailboxMenuOpen(false); props.selectAccount(account.id); }}><span><strong>{account.remark || account.email.split("@")[0]}</strong><small>{account.email}</small></span>{account.id === props.account?.id && <Check size={13} />}</button>)}</div></>}</span><button type="button" className={mailboxCopied ? "copied" : ""} onClick={() => void copyCurrentMailbox()} aria-label={t(mailboxCopied ? "已复制邮箱" : "复制邮箱")} title={t(mailboxCopied ? "已复制邮箱" : "复制邮箱")}>{mailboxCopied ? <Check size={13} /> : <Copy size={13} />}</button><em>{props.total + props.pendingSends.length} {t("封邮件")}</em></span></div><div className="column-actions"><button disabled={props.fontScale <= 0.9} onClick={() => props.setFontScale((value) => Math.max(0.9, Number((value - 0.1).toFixed(1))))} aria-label={t("减小邮件列表字号")}><Minus size={15} /></button><span className="font-scale-label">{Math.round(props.fontScale * 100)}%</span><button disabled={props.fontScale >= 1.4} onClick={() => props.setFontScale((value) => Math.min(1.4, Number((value + 0.1).toFixed(1))))} aria-label={t("增大邮件列表字号")}><Plus size={15} /></button><button onClick={props.reload} aria-label={t("同步")}><RefreshCw size={16} /></button></div></div>
           <div className="message-list">
 			{props.pendingSends.map((pending) => (
 				<div className={`message-row pending-send-row ${pending.status}`} key={pending.id}>
