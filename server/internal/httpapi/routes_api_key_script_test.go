@@ -272,3 +272,19 @@ func TestScriptJunkMessageIDsStayDisambiguatedAndSortNewestFirst(t *testing.T) {
 		t.Fatalf("sort order: %#v", messages)
 	}
 }
+
+func TestScriptMessagesKeepOnlyMailSinceLease(t *testing.T) {
+	leasedAt := "2026-08-21T10:00:00Z"
+	messages := filterScriptMessagesSince([]map[string]any{
+		{"id": "old", "receivedAt": "2026-08-21T09:59:59Z"},
+		{"id": "same", "receivedAt": "2026-08-21T10:00:00.000000000Z"},
+		{"id": "new", "receivedAt": "2026-08-21T10:00:01Z"},
+		{"id": "bad", "receivedAt": "not-a-date"},
+	}, leasedAt)
+	if len(messages) != 2 || messages[0]["id"] != "same" || messages[1]["id"] != "new" {
+		t.Fatalf("lease window: %#v", messages)
+	}
+	if scriptReceivedAtOrAfter("2026-08-21T09:59:59Z", leasedAt) {
+		t.Fatal("mail before lease should be hidden")
+	}
+}

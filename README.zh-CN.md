@@ -199,12 +199,12 @@ API Key 只能用 `Authorization: Bearer mlk_...` 访问这一组路径。请先
 | --- | --- | --- |
 | `GET` | `/api/v1/keys/capabilities` | `{ "version": 1, "scopes": ["inbox.lease", "mail.read"] }` |
 | `POST` | `/api/v1/keys/inboxes/lease` | 正文 `{ "group" }`，`platform` 可选。返回 `leaseId`、`email`、`expiresAt`（30 分钟）。池空时 `409` |
-| `GET` | `/api/v1/keys/inboxes/{leaseId}/messages` | 收件箱 + 垃圾箱合并列表：`id`、`from`、`subject`、`receivedAt`、`folder`（`inbox` 或 `junk`）。IMAP 垃圾箱邮件的 `id` 带 `junk:` 前缀 |
+| `GET` | `/api/v1/keys/inboxes/{leaseId}/messages` | 收件箱 + 垃圾箱合并列表：只返回租约开始之后的邮件；`id`、`from`、`subject`、`receivedAt`、`folder`（`inbox` 或 `junk`）。IMAP 垃圾箱邮件的 `id` 带 `junk:` 前缀 |
 | `GET` | `/api/v1/keys/inboxes/{leaseId}/messages/{id}` | 邮件正文：`text`、`html` |
 | `POST` | `/api/v1/keys/inboxes/{leaseId}/success` | 保留占用。按平台租的只锁该平台；不传 platform 租的是全平台锁 |
 | `POST` | `/api/v1/keys/inboxes/{leaseId}/release` | 可选 `{ "reason" }`。不需要传 platform，只解除该租约：全局租约解开后所有平台都能再领 |
 
-领邮箱时即占用。指定 `platform` 时同一封邮箱仍可租给其他平台；不传则全平台占用。成功保持该锁；失败 release 或租约超时解除该锁。success / release 都只认 `leaseId`。读信会同时拉取收件箱和垃圾箱，按时间合并后返回最新 100 封；没有垃圾箱时不影响收件箱。
+领邮箱时即占用。指定 `platform` 时同一封邮箱仍可租给其他平台；不传则全平台占用。成功保持该锁；失败 release 或租约超时解除该锁。success / release 都只认 `leaseId`。读信会同时拉取收件箱和垃圾箱，丢掉租约开始之前的邮件，再按时间合并后返回最新 100 封；没有垃圾箱时不影响收件箱。
 
 「账号管理」列表会显示每个账号的分组和当前占用的平台（全平台占用显示为「全平台」）。点分组标签可以改分组或移出分组；点占用标签上的 `×` 会解除该占用，邮箱立刻回到可分配的池子里。对应接口是 `DELETE /api/accounts/{id}/occupancies`，可选 `?platform=`（省略即解除该账号全部占用，`*` 表示全平台占用）。
 

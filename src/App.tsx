@@ -2080,8 +2080,9 @@ const scriptEndpoints = [
   {
     method: "GET",
     path: "/api/v1/keys/inboxes/{leaseId}/messages",
-    summary: "列出该租约邮箱的最新邮件，收件箱与垃圾箱已合并并按时间倒序，最多 100 封。",
+    summary: "列出该租约开始之后的邮件，收件箱与垃圾箱已合并并按时间倒序，最多 100 封。",
     notes: [
+      "只返回 receivedAt 不早于租约 createdAt 的邮件，租用前的历史邮件不会出现。",
       "folder 字段标明来源：inbox 或 junk。",
       "垃圾箱邮件的 id 带 junk: 前缀，直接原样传给读取正文的接口即可。",
       "租约过期、已 success 或已 release 时返回 404。",
@@ -2114,6 +2115,7 @@ const scriptEndpoints = [
     notes: [
       "id 用列表里的原值；带 junk: 前缀时只在垃圾箱查找。",
       "text 是纯文本正文，html 是原始 HTML，可能其中一个为空。",
+      "租约开始之前的邮件即使知道 id 也无法读取。",
     ],
     request: `curl -s ${scriptEndpointBase}/api/v1/keys/inboxes/6f1c0c2f8f7c4c0e/messages/1042 \\
   -H "Authorization: Bearer mlk_..."`,
@@ -2297,7 +2299,7 @@ function APIKeysPage() {
             <h3>{t("典型流程")}</h3>
             <ol className="settings-api-key-flow">
               <li>{t("lease 领一封邮箱，拿到 leaseId 和 email，租约 30 分钟内有效。")}</li>
-              <li>{t("用 email 去目标平台注册，然后轮询 messages 等验证码，列表已合并收件箱和垃圾箱。")}</li>
+              <li>{t("用 email 去目标平台注册，然后轮询 messages 等验证码，列表只含租约开始后的收件箱和垃圾箱邮件。")}</li>
               <li>{t("需要正文时用列表里的 id 调 messages/{id}。")}</li>
               <li>{t("注册成功调 success 保留占用；失败或超时调 release 把邮箱还回池子。")}</li>
             </ol>

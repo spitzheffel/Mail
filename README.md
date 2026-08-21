@@ -204,12 +204,12 @@ API keys authenticate only this prefix with `Authorization: Bearer mlk_...`. Put
 | --- | --- | --- |
 | `GET` | `/api/v1/keys/capabilities` | `{ "version": 1, "scopes": ["inbox.lease", "mail.read"] }` |
 | `POST` | `/api/v1/keys/inboxes/lease` | Body `{ "group" }` with optional `platform`. Returns `leaseId`, `email`, `expiresAt` (30 minutes). `409` if the pool is empty |
-| `GET` | `/api/v1/keys/inboxes/{leaseId}/messages` | Merged inbox + junk list: `id`, `from`, `subject`, `receivedAt`, `folder` (`inbox` or `junk`). IMAP junk ids are prefixed with `junk:` |
+| `GET` | `/api/v1/keys/inboxes/{leaseId}/messages` | Merged inbox + junk list, only mail received at or after the lease start: `id`, `from`, `subject`, `receivedAt`, `folder` (`inbox` or `junk`). IMAP junk ids are prefixed with `junk:` |
 | `GET` | `/api/v1/keys/inboxes/{leaseId}/messages/{id}` | Inbox body: `text`, `html` |
 | `POST` | `/api/v1/keys/inboxes/{leaseId}/success` | Keep the lock. A named platform lock stays per-platform; a lease without `platform` stays global |
 | `POST` | `/api/v1/keys/inboxes/{leaseId}/release` | Optional `{ "reason" }`. Do not send `platform`; releasing a global lease makes the address available to every platform again |
 
-A named lease occupies only that platform, so the same mailbox can still go to `trae` and `cursor`. Omitting `platform` occupies the mailbox globally. Success keeps the lock; release or TTL expiry clears that lease. Success and release do not take `platform`. Message reads merge Inbox and Junk, newest 100 first. A missing junk folder does not fail the inbox list.
+A named lease occupies only that platform, so the same mailbox can still go to `trae` and `cursor`. Omitting `platform` occupies the mailbox globally. Success keeps the lock; release or TTL expiry clears that lease. Success and release do not take `platform`. Message reads merge Inbox and Junk, drop mail from before the lease started, then return the newest 100. A missing junk folder does not fail the inbox list.
 
 The Accounts page lists the group and every active occupancy of each mailbox (a global occupancy shows as "All platforms"). Click the group tag to rename or clear the group, and the `×` on an occupancy tag to release it, which returns the mailbox to the pool immediately. That button calls `DELETE /api/accounts/{id}/occupancies` with an optional `?platform=` (omit it to release every occupancy of the account, `*` for the global one).
 

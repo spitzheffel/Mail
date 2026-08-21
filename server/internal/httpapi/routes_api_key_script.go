@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/amine123max/Mail/server/internal/auth"
@@ -83,11 +84,11 @@ func (s *Server) writeScriptLeaseMutation(response http.ResponseWriter, occupanc
 }
 
 func (s *Server) listScriptInboxMessages(response http.ResponseWriter, request *http.Request) error {
-	account, err := s.scriptLeaseAccount(request)
+	account, occupancy, err := s.scriptLeaseAccount(request)
 	if err != nil {
 		return err
 	}
-	messages, err := s.listScriptLeaseMessages(request, account)
+	messages, err := s.listScriptLeaseMessages(request, account, occupancy.CreatedAt)
 	if err != nil {
 		return err
 	}
@@ -96,7 +97,7 @@ func (s *Server) listScriptInboxMessages(response http.ResponseWriter, request *
 }
 
 func (s *Server) getScriptInboxMessage(response http.ResponseWriter, request *http.Request) error {
-	account, err := s.scriptLeaseAccount(request)
+	account, occupancy, err := s.scriptLeaseAccount(request)
 	if err != nil {
 		return err
 	}
@@ -108,6 +109,9 @@ func (s *Server) getScriptInboxMessage(response http.ResponseWriter, request *ht
 	detail, err := s.getScriptLeaseMessage(request, account, uid, junkOnly)
 	if err != nil {
 		return err
+	}
+	if !scriptReceivedAtOrAfter(detail.Date, occupancy.CreatedAt) {
+		return &mailservice.Error{Message: "邮件不存在或已被删除", Code: "MESSAGE_NOT_FOUND", Status: http.StatusNotFound}
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
 		"id":         fmt.Sprint(detail.UID),
@@ -122,7 +126,7 @@ func (s *Server) getScriptInboxMessage(response http.ResponseWriter, request *ht
 
 var scriptJunkFolderNames = []string{"Junk", "Junk Email", "Junk E-mail", "JunkEmail", "Spam", "垃圾邮件", "graph:junkemail"}
 
-func (s *Server) listScriptLeaseMessages(request *http.Request, account *model.AccountCredentials) ([]map[string]any, error) {
+func (s *Server) listScriptLeaseMessages(request *http.Request, account *model.AccountCredentials, leasedAt string) ([]map[string]any, error) {
 	inbox, err := s.mail.ListMessages(request.Context(), account, "INBOX", 1, 100, "")
 	if err != nil {
 		return nil, err
@@ -131,6 +135,7 @@ func (s *Server) listScriptLeaseMessages(request *http.Request, account *model.A
 	if junk, ok := s.listScriptJunkMessages(request, account); ok {
 		messages = append(messages, junk...)
 	}
+	messages = filterScriptMessagesSince(messages, leasedAt)
 	sortScriptMessages(messages)
 	if len(messages) > 100 {
 		messages = messages[:100]
@@ -204,22 +209,59 @@ func sortScriptMessages(messages []map[string]any) {
 	})
 }
 
-func (s *Server) scriptLeaseAccount(request *http.Request) (*model.AccountCredentials, error) {
+func filterScriptMessagesSince(messages []map[string]any, leasedAt string) []map[string]any {
+	filtered := make([]map[string]any, 0, len(messages))
+	for _, message := range messages {
+		receivedAt, _ := message["receivedAt"].(string)
+		if scriptReceivedAtOrAfter(receivedAt, leasedAt) {
+			filtered = append(filtered, message)
+		}
+	}
+	return filtered
+}
+
+func scriptReceivedAtOrAfter(receivedAt, leasedAt string) bool {
+	received, ok := parseScriptTime(receivedAt)
+	if !ok {
+		return false
+	}
+	leased, ok := parseScriptTime(leasedAt)
+	if !ok {
+		return false
+	}
+	return !received.Before(leased)
+}
+
+func parseScriptTime(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return parsed.UTC(), true
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed.UTC(), true
+	}
+	return time.Time{}, false
+}
+
+func (s *Server) scriptLeaseAccount(request *http.Request) (*model.AccountCredentials, *model.InboxOccupancy, error) {
 	occupancy, err := s.store.ActiveInboxLease(request.Context(), apiKeyIDFrom(request), request.PathValue("leaseId"))
 	if errors.Is(err, store.ErrInboxLeaseNotFound) {
-		return nil, &auth.Error{Message: "租约不存在或已结束", Code: "INBOX_LEASE_NOT_FOUND", Status: http.StatusNotFound}
+		return nil, nil, &auth.Error{Message: "租约不存在或已结束", Code: "INBOX_LEASE_NOT_FOUND", Status: http.StatusNotFound}
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	account, err := s.store.GetAccountCredentials(request.Context(), identityFrom(request).OwnerKey, occupancy.AccountID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if account == nil {
-		return nil, &mailservice.Error{Message: "邮箱账号不存在", Code: "ACCOUNT_NOT_FOUND", Status: http.StatusNotFound}
+		return nil, nil, &mailservice.Error{Message: "邮箱账号不存在", Code: "ACCOUNT_NOT_FOUND", Status: http.StatusNotFound}
 	}
-	return account, nil
+	return account, occupancy, nil
 }
 
 func scriptLeaseJSON(occupancy *model.InboxOccupancy) map[string]any {
