@@ -356,6 +356,25 @@ func TestInboxOccupancyLeasePlatformIsolationAndTTL(t *testing.T) {
 	if err != nil || cursor == nil || cursor.AccountID != trae.AccountID {
 		t.Fatalf("same account should lease to another platform: %#v %#v %v", trae, cursor, err)
 	}
+	listed, err := storage.ListAccounts(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var platforms []string
+	for _, account := range listed {
+		if account.ID != trae.AccountID {
+			continue
+		}
+		if account.Group != "register-pool" {
+			t.Fatalf("listed group: %#v", account)
+		}
+		for _, occupancy := range account.Occupancies {
+			platforms = append(platforms, occupancy.Platform)
+		}
+	}
+	if strings.Join(platforms, ",") != "trae,cursor" {
+		t.Fatalf("listed platforms: %#v", platforms)
+	}
 
 	if _, err := storage.CompleteInboxLease(ctx, betaKey.ID, trae.LeaseID); !errors.Is(err, ErrInboxLeaseNotFound) {
 		t.Fatalf("cross-key success: %v", err)
@@ -398,6 +417,86 @@ func TestInboxOccupancyLeasePlatformIsolationAndTTL(t *testing.T) {
 	}
 	if apiKeyID.Valid || status != model.InboxOccupancyOccupied {
 		t.Fatalf("occupied row should survive key delete: api_key_id=%v status=%s", apiKeyID, status)
+	}
+}
+
+func TestInboxOccupancyGlobalPlatformBlocksAllAndReleaseWithoutPlatform(t *testing.T) {
+	storage := openTestStore(t)
+	ctx := context.Background()
+	user, err := storage.CreateUser(ctx, "alpha", "hash", "alpha@example.com", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := "user:" + fmt.Sprint(user.ID)
+	if _, err := storage.ImportAccounts(ctx, owner, []model.ImportedAccount{
+		{Email: "one@example.invalid", Password: "p1", ClientID: "c1", RefreshToken: "refresh-token-long-1"},
+		{Email: "two@example.invalid", Password: "p2", ClientID: "c2", RefreshToken: "refresh-token-long-2"},
+	}, "skip"); err != nil {
+		t.Fatal(err)
+	}
+	accounts, err := storage.ListAccounts(ctx, owner)
+	if err != nil || len(accounts) != 2 {
+		t.Fatalf("import accounts: %#v %v", accounts, err)
+	}
+	if ok, err := storage.SetAccountsGroup(ctx, owner, []int64{accounts[0].ID, accounts[1].ID}, "register-pool"); err != nil || !ok {
+		t.Fatalf("set group: %v %v", ok, err)
+	}
+	key, err := storage.InsertAPIKey(ctx, user.ID, "script", "mlk_alphaaaaa", strings.Repeat("c", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	global, err := storage.LeaseInbox(ctx, user.ID, key.ID, "register-pool", "")
+	if err != nil || global == nil || global.Platform != model.InboxOccupancyGlobalPlatform {
+		t.Fatalf("global lease: %#v %v", global, err)
+	}
+	if NormalizeInboxPlatform("") != model.InboxOccupancyGlobalPlatform || NormalizeInboxPlatform(" * ") != model.InboxOccupancyGlobalPlatform {
+		t.Fatal("empty platform should normalize to global")
+	}
+	named, err := storage.LeaseInbox(ctx, user.ID, key.ID, "register-pool", "trae")
+	if err != nil || named.AccountID == global.AccountID {
+		t.Fatalf("named lease should skip globally occupied mailbox: %#v %#v %v", global, named, err)
+	}
+	if _, err := storage.LeaseInbox(ctx, user.ID, key.ID, "register-pool", ""); !errors.Is(err, ErrInboxPoolExhausted) {
+		t.Fatalf("second global lease should miss remaining named occupancy: %v", err)
+	}
+
+	released, err := storage.ReleaseInboxLease(ctx, key.ID, global.LeaseID)
+	if err != nil || released.Status != model.InboxOccupancyReleased {
+		t.Fatalf("release global: %#v %v", released, err)
+	}
+	reused, err := storage.LeaseInbox(ctx, user.ID, key.ID, "register-pool", "cursor")
+	if err != nil || reused.AccountID != global.AccountID {
+		t.Fatalf("released global mailbox should return to named pool: %#v %#v %v", global, reused, err)
+	}
+	listed, err := storage.ListAccounts(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found []model.AccountOccupancy
+	for _, account := range listed {
+		if account.ID == reused.AccountID {
+			found = account.Occupancies
+		}
+	}
+	if len(found) != 1 || found[0].Platform != "cursor" || found[0].Status != model.InboxOccupancyLeased {
+		t.Fatalf("list occupancies: %#v", found)
+	}
+
+	if _, owned, err := storage.ReleaseAccountOccupancies(ctx, "user:999999", reused.AccountID, nil); err != nil || owned {
+		t.Fatalf("foreign owner should not release: %v %v", owned, err)
+	}
+	trae := "trae"
+	if count, owned, err := storage.ReleaseAccountOccupancies(ctx, owner, reused.AccountID, &trae); err != nil || !owned || count != 0 {
+		t.Fatalf("release of an unrelated platform should be a no-op: %d %v %v", count, owned, err)
+	}
+	count, owned, err := storage.ReleaseAccountOccupancies(ctx, owner, reused.AccountID, nil)
+	if err != nil || !owned || count != 1 {
+		t.Fatalf("manual release: %d %v %v", count, owned, err)
+	}
+	again, err := storage.LeaseInbox(ctx, user.ID, key.ID, "register-pool", "cursor")
+	if err != nil || again.AccountID != reused.AccountID {
+		t.Fatalf("manually released mailbox should be leasable again: %#v %v", again, err)
 	}
 }
 

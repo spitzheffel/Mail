@@ -83,6 +83,7 @@ type graphAttachment struct {
 
 var graphFolders = []Folder{
 	{Path: "graph:inbox", Name: "Inbox", SpecialUse: stringPtr("\\Inbox"), Delimiter: "/"},
+	{Path: "graph:junkemail", Name: "Junk", SpecialUse: stringPtr("\\Junk"), Delimiter: "/"},
 	{Path: "graph:sentitems", Name: "Sent", SpecialUse: stringPtr("\\Sent"), Delimiter: "/"},
 	{Path: "graph:drafts", Name: "Drafts", SpecialUse: stringPtr("\\Drafts"), Delimiter: "/"},
 	{Path: "graph:archive", Name: "Archive", SpecialUse: stringPtr("\\Archive"), Delimiter: "/"},
@@ -616,6 +617,8 @@ func graphFolder(folder string) string {
 		return "drafts"
 	case strings.Contains(normalized, "archive"):
 		return "archive"
+	case strings.Contains(normalized, "junk") || strings.Contains(normalized, "spam"):
+		return "junkemail"
 	case strings.Contains(normalized, "deleted") || strings.Contains(normalized, "trash"):
 		return "deleteditems"
 	default:

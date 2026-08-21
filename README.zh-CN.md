@@ -39,7 +39,7 @@ Mail 将多邮箱收件、阅读、整理和发件集中在一个响应式 Web �
 
 | | 功能 | 说明 |
 | --- | --- | --- |
-| ✉️ | 统一邮箱工作台 | 多账号收件箱、已发送、草稿、归档、已删除、搜索与邮件正文阅读。 |
+| ✉️ | 统一邮箱工作台 | 多账号收件箱、垃圾箱、已发送、草稿、归档、已删除、搜索与邮件正文阅读。 |
 | 🔐 | 私有数据存储 | 密码、Client ID 与 Refresh Token 写入 SQLite 前使用 AES-256-GCM 加密。 |
 | 🚀 | 混合 OAuth2 传输 | IMAP XOAUTH2 与 Microsoft Graph 收件，并通过 SMTP OAuth2 与 Graph 自动回退发件。 |
 | 👥 | 多用户严格隔离 | 所有数据库操作均绑定登录用户或独立游客会话。 |
@@ -193,18 +193,20 @@ Mail 不会要求用户在应用中输入微软密码。用户在微软验证页
 
 ## 脚本接口（`/api/v1/keys`）
 
-API Key 只能用 `Authorization: Bearer mlk_...` 访问这一组路径。请先把脚本池账号分到同一个分组（例如 `register-pool`）。占用记录的是 `(账号, platform)`，不会写在账号表上。
+API Key 只能用 `Authorization: Bearer mlk_...` 访问这一组路径。请先把脚本池账号分到同一个分组（例如 `register-pool`）。占用记录的是 `(账号, platform)`，不会写在账号表上。`platform` 可选：不传表示全平台占用，该邮箱对任何平台都不再分配。success / release 只需要 `leaseId`，不必再传 platform。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/api/v1/keys/capabilities` | `{ "version": 1, "scopes": ["inbox.lease", "mail.read"] }` |
-| `POST` | `/api/v1/keys/inboxes/lease` | 正文 `{ "group", "platform" }`。返回 `leaseId`、`email`、`expiresAt`（30 分钟）。池空时 `409` |
-| `GET` | `/api/v1/keys/inboxes/{leaseId}/messages` | 收件箱列表：`id`、`from`、`subject`、`receivedAt` |
+| `POST` | `/api/v1/keys/inboxes/lease` | 正文 `{ "group" }`，`platform` 可选。返回 `leaseId`、`email`、`expiresAt`（30 分钟）。池空时 `409` |
+| `GET` | `/api/v1/keys/inboxes/{leaseId}/messages` | 收件箱 + 垃圾箱合并列表：`id`、`from`、`subject`、`receivedAt`、`folder`（`inbox` 或 `junk`）。IMAP 垃圾箱邮件的 `id` 带 `junk:` 前缀 |
 | `GET` | `/api/v1/keys/inboxes/{leaseId}/messages/{id}` | 邮件正文：`text`、`html` |
-| `POST` | `/api/v1/keys/inboxes/{leaseId}/success` | 保留该 `(邮箱, platform)` 占用，同一平台下次不会再领到这封 |
-| `POST` | `/api/v1/keys/inboxes/{leaseId}/release` | 可选 `{ "reason" }`。只解除当前 platform 占用，邮箱回到该平台的池 |
+| `POST` | `/api/v1/keys/inboxes/{leaseId}/success` | 保留占用。按平台租的只锁该平台；不传 platform 租的是全平台锁 |
+| `POST` | `/api/v1/keys/inboxes/{leaseId}/release` | 可选 `{ "reason" }`。不需要传 platform，只解除该租约：全局租约解开后所有平台都能再领 |
 
-领邮箱时即占用该 platform。成功则保持占用；失败 release 或租约超时只解开这一个 platform。同一封邮箱可以同时租给 `trae` 和 `cursor`。
+领邮箱时即占用。指定 `platform` 时同一封邮箱仍可租给其他平台；不传则全平台占用。成功保持该锁；失败 release 或租约超时解除该锁。success / release 都只认 `leaseId`。读信会同时拉取收件箱和垃圾箱，按时间合并后返回最新 100 封；没有垃圾箱时不影响收件箱。
+
+「账号管理」列表会显示每个账号的分组和当前占用的平台（全平台占用显示为「全平台」）。点分组标签可以改分组或移出分组；点占用标签上的 `×` 会解除该占用，邮箱立刻回到可分配的池子里。对应接口是 `DELETE /api/accounts/{id}/occupancies`，可选 `?platform=`（省略即解除该账号全部占用，`*` 表示全平台占用）。
 
 ## 页面路径
 
@@ -213,6 +215,7 @@ API Key 只能用 `Authorization: Bearer mlk_...` 访问这一组路径。请先
 | 路径 | 页面 |
 | --- | --- |
 | `/inbox` | 收件箱 |
+| `/junk` | 垃圾箱 |
 | `/sent` | 已发送 |
 | `/drafts` | 草稿 |
 | `/archive` | 归档 |

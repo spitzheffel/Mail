@@ -1,3 +1,8 @@
+export interface AccountOccupancy {
+  platform?: string;
+  status: "leased" | "occupied" | string;
+}
+
 export interface Account {
   id: number;
   email: string;
@@ -8,6 +13,7 @@ export interface Account {
   createdAt: string;
   updatedAt: string;
   lastSyncAt: string | null;
+  occupancies?: AccountOccupancy[];
 }
 
 export interface MailFolder {

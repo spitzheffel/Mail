@@ -39,7 +39,13 @@ func (s *Store) ListAccounts(ctx context.Context, ownerKey string) ([]model.Publ
 		}
 		result = append(result, public)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.attachAccountOccupancies(ctx, ownerKey, result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (s *Store) GetAccountCredentials(ctx context.Context, ownerKey string, id int64) (*model.AccountCredentials, error) {
@@ -344,7 +350,49 @@ func (s *Store) publicAccount(row model.StoredAccount) (model.PublicAccount, err
 		ID: row.ID, Email: email, Remark: row.Remark, Group: row.GroupName,
 		AccountType: row.AccountType, Provider: row.Provider,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, LastSyncAt: row.LastSyncAt,
+		Occupancies: []model.AccountOccupancy{},
 	}, nil
+}
+
+func (s *Store) attachAccountOccupancies(ctx context.Context, ownerKey string, accounts []model.PublicAccount) error {
+	if len(accounts) == 0 {
+		return nil
+	}
+	now := nowISO()
+	if _, err := s.db.ExecContext(ctx, `UPDATE inbox_occupancies SET status=?, updated_at=?
+		WHERE status=? AND expires_at IS NOT NULL AND expires_at<=?`,
+		model.InboxOccupancyReleased, now, model.InboxOccupancyLeased, now); err != nil {
+		return err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT o.account_id, o.platform, o.status
+		FROM inbox_occupancies o JOIN accounts a ON a.id=o.account_id
+		WHERE a.owner_key=? AND o.status IN (?,?) ORDER BY o.created_at ASC, o.id ASC`,
+		ownerKey, model.InboxOccupancyLeased, model.InboxOccupancyOccupied)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	byAccount := make(map[int64][]model.AccountOccupancy)
+	for rows.Next() {
+		var accountID int64
+		var occupancy model.AccountOccupancy
+		if err := rows.Scan(&accountID, &occupancy.Platform, &occupancy.Status); err != nil {
+			return err
+		}
+		if occupancy.Platform == model.InboxOccupancyGlobalPlatform {
+			occupancy.Platform = ""
+		}
+		byAccount[accountID] = append(byAccount[accountID], occupancy)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for index := range accounts {
+		if items := byAccount[accounts[index].ID]; len(items) > 0 {
+			accounts[index].Occupancies = items
+		}
+	}
+	return nil
 }
 
 func (s *Store) encryptImported(account model.ImportedAccount) (string, string, string, string, error) {

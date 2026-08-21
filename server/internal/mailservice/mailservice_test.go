@@ -196,7 +196,7 @@ func TestGraphFolderAndMessageMapping(t *testing.T) {
 	})}}
 	account := &model.AccountCredentials{ID: 99, OwnerKey: "user:1"}
 	folders, err := service.graphFolders(context.Background(), account, "token")
-	if err != nil || len(folders) != 5 || folders[0].Path != "graph:inbox" {
+	if err != nil || len(folders) != 6 || folders[0].Path != "graph:inbox" || folders[1].Path != "graph:junkemail" {
 		t.Fatalf("Graph folders mismatch: %#v %v", folders, err)
 	}
 	result, err := service.graphListMessages(context.Background(), account, "token", "graph:inbox", 1, 30, "")
@@ -386,5 +386,17 @@ func TestIMAPXOAUTH2Payload(t *testing.T) {
 	mechanism, payload, err := (&xoauth2SASL{username: "user@example.com", token: "access-token"}).Start()
 	if err != nil || mechanism != "XOAUTH2" || string(payload) != "user=user@example.com\x01auth=Bearer access-token\x01\x01" {
 		t.Fatalf("XOAUTH2 payload mismatch: %s %q %v", mechanism, payload, err)
+	}
+}
+
+func TestGraphFolderMapsJunkAndIMAPPrefersSpecialUse(t *testing.T) {
+	for _, input := range []string{"junk", "Junk Email", "graph:junkemail", "spam"} {
+		if got := graphFolder(input); got != "junkemail" {
+			t.Fatalf("graphFolder(%q)=%q", input, got)
+		}
+	}
+	special := imapSpecialUse([]string{"\\HasNoChildren", "\\Junk"})
+	if special == nil || *special != "\\Junk" {
+		t.Fatalf("IMAP special-use: %#v", special)
 	}
 }

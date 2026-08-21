@@ -20,6 +20,16 @@ describe("mail routes", () => {
     expect(mailPath("microsoft-oauth", "/mail/")).toBe("/mail/microsoft-oauth");
   });
 
+  it("keeps junk on a first-class mailbox route", () => {
+    expect(routeForSegment("junk")).toMatchObject({
+      segment: "junk",
+      page: "inbox",
+      folder: "junk",
+      known: true,
+    });
+    expect(mailPath("junk", "/mail/")).toBe("/mail/junk");
+  });
+
   it("keeps API key management on its own admin-group tab", () => {
     expect(routeForSegment("api-keys")).toMatchObject({
       segment: "api-keys",

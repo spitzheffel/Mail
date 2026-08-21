@@ -148,6 +148,7 @@ func (s *Server) routes() {
 	s.handleIdentity("PATCH /api/accounts/{id}", false, false, s.updateAccount)
 	s.handleIdentity("PUT /api/accounts/{id}/token", false, false, s.updateAccountToken)
 	s.handleIdentity("DELETE /api/accounts/{id}", false, false, s.deleteAccount)
+	s.handleIdentity("DELETE /api/accounts/{id}/occupancies", false, false, s.releaseAccountOccupancies)
 	s.handleIdentity("PATCH /api/accounts/batch/group", false, false, s.groupAccounts)
 	s.handleIdentity("POST /api/accounts/batch/delete", false, false, s.deleteAccounts)
 

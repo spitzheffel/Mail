@@ -39,7 +39,7 @@ The production runtime is a single Go binary that serves both the API and the co
 
 | | Capability | What it provides |
 | --- | --- | --- |
-| ✉️ | Unified mailbox | Inbox, sent mail, drafts, archive, trash, search, and message reading across multiple accounts. |
+| ✉️ | Unified mailbox | Inbox, junk, sent mail, drafts, archive, trash, search, and message reading across multiple accounts. |
 | 🔐 | Private by design | Passwords, Client IDs, and refresh tokens are encrypted with AES-256-GCM before SQLite persistence. |
 | 🚀 | Hybrid OAuth2 transport | IMAP XOAUTH2 and Microsoft Graph receiving, plus SMTP OAuth2 and Graph sending with automatic fallback. |
 | 👥 | Multi-user isolation | Every query is scoped to an authenticated user or an isolated guest session. |
@@ -198,18 +198,20 @@ Mail never asks the user to enter a Microsoft password. The user completes autho
 
 ## Script API (`/api/v1/keys`)
 
-API keys authenticate only this prefix with `Authorization: Bearer mlk_...`. Put script mailboxes in an account group (for example `register-pool`) first. Occupancy is stored as `(account, platform)`, not on the account row.
+API keys authenticate only this prefix with `Authorization: Bearer mlk_...`. Put script mailboxes in an account group (for example `register-pool`) first. Occupancy is stored as `(account, platform)`, not on the account row. `platform` is optional: omit it to occupy the mailbox for every platform. Success and release only need `leaseId`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/v1/keys/capabilities` | `{ "version": 1, "scopes": ["inbox.lease", "mail.read"] }` |
-| `POST` | `/api/v1/keys/inboxes/lease` | Body `{ "group", "platform" }`. Returns `leaseId`, `email`, `expiresAt` (30 minutes). `409` if the pool is empty |
-| `GET` | `/api/v1/keys/inboxes/{leaseId}/messages` | Inbox list: `id`, `from`, `subject`, `receivedAt` |
+| `POST` | `/api/v1/keys/inboxes/lease` | Body `{ "group" }` with optional `platform`. Returns `leaseId`, `email`, `expiresAt` (30 minutes). `409` if the pool is empty |
+| `GET` | `/api/v1/keys/inboxes/{leaseId}/messages` | Merged inbox + junk list: `id`, `from`, `subject`, `receivedAt`, `folder` (`inbox` or `junk`). IMAP junk ids are prefixed with `junk:` |
 | `GET` | `/api/v1/keys/inboxes/{leaseId}/messages/{id}` | Inbox body: `text`, `html` |
-| `POST` | `/api/v1/keys/inboxes/{leaseId}/success` | Keep `(mailbox, platform)` occupied so the same platform will not receive that address again |
-| `POST` | `/api/v1/keys/inboxes/{leaseId}/release` | Optional `{ "reason" }`. Free this platform occupancy so the address can be leased again |
+| `POST` | `/api/v1/keys/inboxes/{leaseId}/success` | Keep the lock. A named platform lock stays per-platform; a lease without `platform` stays global |
+| `POST` | `/api/v1/keys/inboxes/{leaseId}/release` | Optional `{ "reason" }`. Do not send `platform`; releasing a global lease makes the address available to every platform again |
 
-A lease starts occupied for that platform immediately. Success keeps the lock; release or TTL expiry unlocks only that platform. The same mailbox can be leased to `trae` and `cursor` at the same time.
+A named lease occupies only that platform, so the same mailbox can still go to `trae` and `cursor`. Omitting `platform` occupies the mailbox globally. Success keeps the lock; release or TTL expiry clears that lease. Success and release do not take `platform`. Message reads merge Inbox and Junk, newest 100 first. A missing junk folder does not fail the inbox list.
+
+The Accounts page lists the group and every active occupancy of each mailbox (a global occupancy shows as "All platforms"). Click the group tag to rename or clear the group, and the `×` on an occupancy tag to release it, which returns the mailbox to the pool immediately. That button calls `DELETE /api/accounts/{id}/occupancies` with an optional `?platform=` (omit it to release every occupancy of the account, `*` for the global one).
 
 ## Browser routes
 
@@ -218,6 +220,7 @@ Stable English paths support direct access, refresh, and browser history:
 | Path | View |
 | --- | --- |
 | `/inbox` | Inbox |
+| `/junk` | Junk |
 | `/sent` | Sent mail |
 | `/drafts` | Drafts |
 | `/archive` | Archive |

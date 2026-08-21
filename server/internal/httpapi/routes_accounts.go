@@ -236,6 +236,35 @@ func (s *Server) deleteAccounts(response http.ResponseWriter, request *http.Requ
 	return nil
 }
 
+func (s *Server) releaseAccountOccupancies(response http.ResponseWriter, request *http.Request) error {
+	id, err := parseID(request.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	var platform *string
+	if request.URL.Query().Has("platform") {
+		value := request.URL.Query().Get("platform")
+		if len([]rune(value)) > 64 {
+			return validation("平台标识无效")
+		}
+		platform = &value
+	}
+	ownerKey := identityFrom(request).OwnerKey
+	released, owned, err := s.store.ReleaseAccountOccupancies(request.Context(), ownerKey, id, platform)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return apiFailure(http.StatusNotFound, "ACCOUNT_NOT_FOUND", "邮箱账号不存在", nil)
+	}
+	accounts, err := s.store.ListAccounts(request.Context(), ownerKey)
+	if err != nil {
+		return err
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"released": released, "accounts": accounts})
+	return nil
+}
+
 func positiveIDs(ids []int64) bool {
 	for _, id := range ids {
 		if id < 1 {

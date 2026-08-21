@@ -1,5 +1,5 @@
 export type PageRoute = "login" | "inbox" | "compose" | "accounts" | "oauth" | "settings" | "admin" | "users" | "api-keys";
-export type FolderRoute = "inbox" | "sent" | "drafts" | "archive" | "trash";
+export type FolderRoute = "inbox" | "junk" | "sent" | "drafts" | "archive" | "trash";
 export type DialogRoute = "import" | null;
 export type MailRouteSegment = "" | FolderRoute | "sendmails" | "accounts" | "import" | "oauth" | "microsoft-oauth" | "settings" | "admin" | "users" | "api-keys";
 
@@ -11,7 +11,7 @@ export type MailRoute = {
   known: boolean;
 };
 
-const folderRoutes = new Set<FolderRoute>(["inbox", "sent", "drafts", "archive", "trash"]);
+const folderRoutes = new Set<FolderRoute>(["inbox", "junk", "sent", "drafts", "archive", "trash"]);
 
 export function routeForSegment(value: string): MailRoute {
   const segment = value.trim().replace(/^\/+|\/+$/g, "").toLowerCase();

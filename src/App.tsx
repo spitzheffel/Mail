@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   ArrowLeft,
+  BookOpen,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -33,6 +34,7 @@ import {
   Search,
   Send,
   Settings,
+  ShieldAlert,
   ShieldCheck,
   Star,
   Sun,
@@ -108,7 +110,7 @@ type MessageMoveConfirmation = {
   sourceFolder: string;
   sourceRoute: FolderRoute;
   targetFolder: string;
-  targetRoute: "archive" | "trash";
+  targetRoute: "archive" | "trash" | "inbox";
 };
 const brandLogoUrl = `${import.meta.env.BASE_URL}paper-plane-logo.png`;
 const appBasePath = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -208,12 +210,20 @@ function messageListDate(value: string, locale: string): string {
 }
 
 const folderDefinitions = [
-  { route: "inbox" as FolderRoute, specialUse: "\\Inbox", fallback: "INBOX", label: "收件箱", icon: Inbox },
-  { route: "sent" as FolderRoute, specialUse: "\\Sent", fallback: "Sent", label: "已发送", icon: Send },
-  { route: "drafts" as FolderRoute, specialUse: "\\Drafts", fallback: "Drafts", label: "草稿", icon: FilePenLine },
-  { route: "archive" as FolderRoute, specialUse: "\\Archive", fallback: "Archive", label: "归档", icon: Archive },
-  { route: "trash" as FolderRoute, specialUse: "\\Trash", fallback: "Deleted", label: "已删除", icon: Trash2 },
+  { route: "inbox" as FolderRoute, specialUse: "\\Inbox", fallback: "INBOX", aliases: [] as string[], label: "收件箱", icon: Inbox },
+  { route: "junk" as FolderRoute, specialUse: "\\Junk", fallback: "Junk", aliases: ["Junk Email", "Junk E-mail", "JunkEmail", "Spam", "垃圾邮件", "垃圾箱"], label: "垃圾箱", icon: ShieldAlert },
+  { route: "sent" as FolderRoute, specialUse: "\\Sent", fallback: "Sent", aliases: [], label: "已发送", icon: Send },
+  { route: "drafts" as FolderRoute, specialUse: "\\Drafts", fallback: "Drafts", aliases: [], label: "草稿", icon: FilePenLine },
+  { route: "archive" as FolderRoute, specialUse: "\\Archive", fallback: "Archive", aliases: [], label: "归档", icon: Archive },
+  { route: "trash" as FolderRoute, specialUse: "\\Trash", fallback: "Deleted", aliases: ["Deleted Items", "Trash"], label: "已删除", icon: Trash2 },
 ];
+
+function matchMailboxFolder(folders: MailFolder[], definition: (typeof folderDefinitions)[number]) {
+  const special = folders.find((folder) => folder.specialUse === definition.specialUse);
+  if (special) return special;
+  const names = [definition.fallback, ...definition.aliases].map((name) => name.toLowerCase());
+  return folders.find((folder) => names.includes(folder.path.toLowerCase()) || names.includes(folder.name.toLowerCase()));
+}
 
 function App() {
   const initialRoute = useMemo(() => parseMailPath(window.location.pathname, appBasePath), []);
@@ -261,8 +271,7 @@ function App() {
 
   const selectedAccount = accounts.find((item) => item.id === selectedAccountId) || null;
   const visibleFolders = useMemo(() => folderDefinitions.map((definition) => {
-    const actual = folders.find((folder) => folder.specialUse === definition.specialUse)
-      || folders.find((folder) => folder.path.toLowerCase() === definition.fallback.toLowerCase());
+    const actual = matchMailboxFolder(folders, definition);
     return { ...definition, path: actual?.path || definition.fallback, available: Boolean(actual) || definition.specialUse === "\\Inbox" };
   }), [folders]);
   const selectedFolder = visibleFolders.find((folder) => folder.route === selectedFolderRoute)?.path || "INBOX";
@@ -602,11 +611,11 @@ function App() {
     }
   };
 
-  const requestMessageMove = (uid: number | string, subject: string, targetRoute: "archive" | "trash") => {
+  const requestMessageMove = (uid: number | string, subject: string, targetRoute: "archive" | "trash" | "inbox") => {
     if (!selectedAccountId) return;
     const target = visibleFolders.find((folder) => folder.route === targetRoute);
     if (!target?.available) {
-      notify(targetRoute === "archive" ? "归档文件夹不可用" : "已删除文件夹不可用", "error");
+      notify(targetRoute === "archive" ? "归档文件夹不可用" : targetRoute === "inbox" ? "收件箱不可用" : "已删除文件夹不可用", "error");
       return;
     }
     setMessageMoveConfirmation({
@@ -645,7 +654,7 @@ function App() {
         setMessageReloadVersion((value) => value + 1);
       }
       setMessageMoveConfirmation(null);
-      notify(action.targetRoute === "archive" ? "邮件已归档" : action.sourceRoute === "trash" ? "邮件已永久删除" : "邮件已移至已删除");
+      notify(action.targetRoute === "inbox" ? "邮件已移回收件箱" : action.targetRoute === "archive" ? "邮件已归档" : action.sourceRoute === "trash" ? "邮件已永久删除" : "邮件已移至已删除");
     } catch (error) {
       notify(error instanceof Error ? error.message : "邮件操作失败", "error");
     } finally {
@@ -910,6 +919,7 @@ function App() {
               openMessage={openMessage}
               requestMoveMessage={(message, targetRoute) => requestMessageMove(message.uid, message.subject, targetRoute)}
               archiveMessage={() => { if (selectedMessage) requestMessageMove(selectedMessage.uid, selectedMessage.subject, "archive"); }}
+              restoreInboxMessage={() => { if (selectedMessage) requestMessageMove(selectedMessage.uid, selectedMessage.subject, "inbox"); }}
               deleteMessage={() => { if (selectedMessage) requestMessageMove(selectedMessage.uid, selectedMessage.subject, "trash"); }}
               toggleRead={() => void toggleSelectedMessageRead()}
               toggleFlag={() => void toggleSelectedMessageFlag()}
@@ -1215,8 +1225,9 @@ function InboxPage(props: {
 	authorizePendingSend: (pending: PendingSend) => void;
   closeMessage: () => void;
   openMessage: (message: MessageSummary) => void;
-  requestMoveMessage: (message: MessageSummary, targetRoute: "archive" | "trash") => void;
+  requestMoveMessage: (message: MessageSummary, targetRoute: "archive" | "trash" | "inbox") => void;
   archiveMessage: () => void;
+  restoreInboxMessage: () => void;
   deleteMessage: () => void;
   toggleRead: () => void;
   toggleFlag: () => void;
@@ -1502,9 +1513,11 @@ function InboxPage(props: {
               unread={Boolean(props.messages.find((message) => message.uid === props.selectedMessage?.uid)?.unread)}
               flagged={Boolean(props.messages.find((message) => message.uid === props.selectedMessage?.uid)?.flagged)}
               canArchive={props.folderRoute !== "archive"}
+              canRestoreInbox={props.folderRoute === "junk"}
               actionLoading={props.actionLoading}
               onClose={props.closeMessage}
               onArchive={props.archiveMessage}
+              onRestoreInbox={props.restoreInboxMessage}
               onDelete={props.deleteMessage}
               onToggleRead={props.toggleRead}
               onToggleFlag={props.toggleFlag}
@@ -1520,9 +1533,11 @@ function MessageReader({
   unread,
   flagged,
   canArchive,
+  canRestoreInbox,
   actionLoading,
   onClose,
   onArchive,
+  onRestoreInbox,
   onDelete,
   onToggleRead,
   onToggleFlag,
@@ -1531,9 +1546,11 @@ function MessageReader({
   unread: boolean;
   flagged: boolean;
   canArchive: boolean;
+  canRestoreInbox: boolean;
   actionLoading: boolean;
   onClose: () => void;
   onArchive: () => void;
+  onRestoreInbox: () => void;
   onDelete: () => void;
   onToggleRead: () => void;
   onToggleFlag: () => void;
@@ -1569,7 +1586,7 @@ function MessageReader({
   return (
     <>
       <div className="reader-head">
-        <div className="reader-tools"><button className="reader-back" onClick={onClose} aria-label={t("返回邮件列表")}><ArrowLeft size={16} /></button><span className="reader-tool-spacer" /><button disabled={actionLoading} onClick={onToggleRead} aria-label={t(unread ? "标记为已读" : "标记为未读")} title={t(unread ? "标记为已读" : "标记为未读")}>{unread ? <MailOpen size={16} /> : <Mail size={16} />}</button><button disabled={!canArchive || actionLoading} onClick={onArchive} aria-label={t("归档")} title={t("归档")}><Archive size={16} /></button><button disabled={actionLoading} onClick={onDelete} aria-label={t("删除")} title={t("删除")}><Trash2 size={16} /></button><button className={flagged ? "flagged" : ""} disabled={actionLoading} onClick={onToggleFlag} aria-label={t(flagged ? "取消收藏" : "收藏")} title={t(flagged ? "取消收藏" : "收藏")}><Star size={16} /></button></div>
+        <div className="reader-tools"><button className="reader-back" onClick={onClose} aria-label={t("返回邮件列表")}><ArrowLeft size={16} /></button><span className="reader-tool-spacer" /><button disabled={actionLoading} onClick={onToggleRead} aria-label={t(unread ? "标记为已读" : "标记为未读")} title={t(unread ? "标记为已读" : "标记为未读")}>{unread ? <MailOpen size={16} /> : <Mail size={16} />}</button>{canRestoreInbox && <button disabled={actionLoading} onClick={onRestoreInbox} aria-label={t("移回收件箱")} title={t("移回收件箱")}><Inbox size={16} /></button>}<button disabled={!canArchive || actionLoading} onClick={onArchive} aria-label={t("归档")} title={t("归档")}><Archive size={16} /></button><button disabled={actionLoading} onClick={onDelete} aria-label={t("删除")} title={t("删除")}><Trash2 size={16} /></button><button className={flagged ? "flagged" : ""} disabled={actionLoading} onClick={onToggleFlag} aria-label={t(flagged ? "取消收藏" : "收藏")} title={t(flagged ? "取消收藏" : "收藏")}><Star size={16} /></button></div>
         <h2>{message.subject}</h2>
         <div className="reader-sender"><span className="sender-avatar large">{initials(message.from)}</span><div><strong>{message.from}</strong><span>{t("发送给 {to}", { to: message.to || "me" })}</span></div><time>{formatDate(message.date, true, language === "en" ? "en-US" : "zh-CN")}</time></div>
       </div>
@@ -1593,8 +1610,10 @@ function MessageMoveConfirmDialog({
   const { t } = useI18n();
   if (!action) return null;
   const deleting = action.targetRoute === "trash";
+  const restoring = action.targetRoute === "inbox";
   const permanent = deleting && action.sourceRoute === "trash";
-  const title = permanent ? "确认永久删除邮件" : deleting ? "确认移到已删除" : "确认归档邮件";
+  const title = permanent ? "确认永久删除邮件" : deleting ? "确认移到已删除" : restoring ? "确认移回收件箱" : "确认归档邮件";
+  const confirmLabel = permanent ? "永久删除" : deleting ? "移到已删除" : restoring ? "移回收件箱" : "归档";
   return (
     <div className="message-action-backdrop" onMouseDown={onClose}>
       <section
@@ -1606,13 +1625,13 @@ function MessageMoveConfirmDialog({
       >
         <div className="message-action-copy">
           <div className="message-action-title">
-            <span className={deleting ? "danger" : "success"}>{deleting ? <Trash2 size={18} /> : <Archive size={18} />}</span>
+            <span className={deleting ? "danger" : "success"}>{deleting ? <Trash2 size={18} /> : restoring ? <Inbox size={18} /> : <Archive size={18} />}</span>
             <h2>{t(title)}</h2>
           </div>
           <strong>{action.subject}</strong>
         </div>
         <button className={`message-action-option ${deleting ? "danger" : "success"}`} disabled={loading} onClick={onConfirm}>
-          {loading ? t("处理中…") : t(permanent ? "永久删除" : deleting ? "移到已删除" : "归档")}
+          {loading ? t("处理中…") : t(confirmLabel)}
         </button>
         <button className="message-action-option cancel" disabled={loading} onClick={onClose}>{t("取消")}</button>
       </section>
@@ -1656,16 +1675,21 @@ function AccountDeleteConfirmDialog({
   );
 }
 
-function AccountBatchGroupDialog({ open, count, value, loading, onChange, onClose, onConfirm }: { open: boolean; count: number; value: string; loading: boolean; onChange: (value: string) => void; onClose: () => void; onConfirm: () => void }) {
+function AccountGroupDialog({ open, title, description, value, groups, loading, canClear, onChange, onClose, onConfirm, onClear }: { open: boolean; title: string; description: string; value: string; groups: string[]; loading: boolean; canClear: boolean; onChange: (value: string) => void; onClose: () => void; onConfirm: () => void; onClear: () => void }) {
   const { t } = useI18n();
   if (!open) return null;
   return (
     <div className="message-action-backdrop" onMouseDown={onClose}>
-      <section className="account-batch-dialog" role="dialog" aria-modal="true" aria-label={t("批量设置分组")} onMouseDown={(event) => event.stopPropagation()}>
+      <section className="account-batch-dialog" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
         <span className="account-batch-dialog-icon group"><FolderCog size={20} /></span>
-        <div><h2>{t("批量设置分组")}</h2><p>{t("为已选择的 {count} 个邮箱设置分组", { count })}</p></div>
-        <label><span>{t("分组名称")}</span><input autoFocus value={value} maxLength={80} onChange={(event) => onChange(event.target.value)} placeholder={t("例如：工作、个人或项目")} /></label>
-        <div className="account-batch-dialog-actions"><button className="button secondary" disabled={loading} onClick={onClose}>{t("取消")}</button><button className="button primary" disabled={loading} onClick={onConfirm}>{loading ? t("处理中…") : t("保存分组")}</button></div>
+        <div><h2>{title}</h2><p>{description}</p></div>
+        <label><span>{t("分组名称")}</span><input autoFocus list="account-group-suggestions" value={value} maxLength={80} onChange={(event) => onChange(event.target.value)} placeholder={t("例如：工作、个人或项目")} /></label>
+        <datalist id="account-group-suggestions">{groups.map((group) => <option value={group} key={group} />)}</datalist>
+        <div className="account-batch-dialog-actions">
+          <button className="button secondary" disabled={loading} onClick={onClose}>{t("取消")}</button>
+          {canClear && <button className="button secondary" disabled={loading} onClick={onClear}>{t("移出分组")}</button>}
+          <button className="button primary" disabled={loading} onClick={onConfirm}>{loading ? t("处理中…") : t("保存分组")}</button>
+        </div>
       </section>
     </div>
   );
@@ -1701,8 +1725,9 @@ function AccountsPage({ accounts, openImport, notify, reload, authorize, request
   const [batchAction, setBatchAction] = useState<"export" | "copy" | "group" | "delete" | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [busyAction, setBusyAction] = useState(false);
-  const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const [groupEditor, setGroupEditor] = useState<{ ids: number[]; batch: boolean } | null>(null);
   const [groupValue, setGroupValue] = useState("");
+  const [releasingKey, setReleasingKey] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
@@ -1713,7 +1738,8 @@ function AccountsPage({ accounts, openImport, notify, reload, authorize, request
   const filtered = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     return accounts.filter((account) => {
-      const matchesQuery = !normalized || `${account.email}\n${account.remark || ""}\n${account.group || ""}`.toLocaleLowerCase().includes(normalized);
+      const occupancyText = (account.occupancies || []).map((occupancy) => occupancy.platform || "all").join("\n");
+      const matchesQuery = !normalized || `${account.email}\n${account.remark || ""}\n${account.group || ""}\n${occupancyText}`.toLocaleLowerCase().includes(normalized);
       const matchesGroup = groupFilter === "all" || (groupFilter === "ungrouped" ? !account.group : account.group === groupFilter.slice(6));
       return matchesQuery && matchesGroup;
     });
@@ -1764,7 +1790,7 @@ function AccountsPage({ accounts, openImport, notify, reload, authorize, request
   const cancelBatchMode = () => {
     setBatchAction(null);
     setSelectedIds(new Set());
-    setGroupDialogOpen(false);
+    setGroupEditor(null);
     setDeleteDialogOpen(false);
   };
 
@@ -1773,7 +1799,7 @@ function AccountsPage({ accounts, openImport, notify, reload, authorize, request
     if (!batchAction || !ids.length) return;
     if (batchAction === "group") {
       setGroupValue(selectedAccounts.every((account) => account.group === selectedAccounts[0]?.group) ? selectedAccounts[0]?.group || "" : "");
-      setGroupDialogOpen(true);
+      setGroupEditor({ ids, batch: true });
       return;
     }
     if (batchAction === "delete") {
@@ -1798,17 +1824,33 @@ function AccountsPage({ accounts, openImport, notify, reload, authorize, request
     }
   };
 
-  const confirmGroup = async () => {
+  const confirmGroup = async (nextGroup: string) => {
+    if (!groupEditor) return;
+    const group = nextGroup.trim();
     setBusyAction(true);
     try {
-      await api("/api/accounts/batch/group", { method: "PATCH", body: JSON.stringify({ ids: selectedAccounts.map((account) => account.id), group: groupValue.trim() }) });
-      notify(t(groupValue.trim() ? "账号分组已更新" : "账号已移出分组"));
+      await api("/api/accounts/batch/group", { method: "PATCH", body: JSON.stringify({ ids: groupEditor.ids, group }) });
+      notify(t(group ? "账号分组已更新" : "账号已移出分组"));
       reload();
-      cancelBatchMode();
+      if (groupEditor.batch) cancelBatchMode(); else setGroupEditor(null);
     } catch (error) {
       notify(error instanceof Error ? error.message : t("设置分组失败"), "error");
     } finally {
       setBusyAction(false);
+    }
+  };
+
+  const releaseOccupancy = async (account: Account, platform: string) => {
+    const key = `${account.id}:${platform}`;
+    setReleasingKey(key);
+    try {
+      await api(`/api/accounts/${account.id}/occupancies?platform=${encodeURIComponent(platform)}`, { method: "DELETE" });
+      notify(t("占用已解除"));
+      reload();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : t("解除占用失败"), "error");
+    } finally {
+      setReleasingKey("");
     }
   };
 
@@ -1849,12 +1891,27 @@ function AccountsPage({ accounts, openImport, notify, reload, authorize, request
       {selectionMode && <div className={`account-batch-selection ${batchAction}`}><div><button type="button" onClick={() => setSelectedIds(allSelected ? new Set() : new Set(filtered.map((account) => account.id)))}><span className={allSelected ? "selection-box checked" : "selection-box"}>{allSelected && <Check size={12} />}</span>{t(allSelected ? "取消全选" : "全选")}</button><span>{t("已选择 {count} 个账号", { count: selectedIds.size })}</span></div><div><button type="button" className="button secondary" onClick={cancelBatchMode}>{t("取消")}</button><button type="button" className="button batch-run" disabled={!selectedIds.size || busyAction} onClick={() => void executeBatchAction()}>{busyAction ? t("处理中…") : `${batchActionLabel} (${selectedIds.size})`}</button></div></div>}
 
       <div className={`professional-accounts-table ${selectionMode ? "export-mode" : ""}`}>
-        <div className="professional-account-head">{selectionMode && <span /> }<span>#</span><span>{t("邮箱地址")}</span><span>{t("连接状态")}</span><span>{t("权限类型")}</span><span>{t("最后同步")}</span><span>{t("操作")}</span></div>
+        <div className="professional-account-head">{selectionMode && <span /> }<span>#</span><span>{t("邮箱地址")}</span><span>{t("分组")}</span><span>{t("占用")}</span><span>{t("连接状态")}</span><span>{t("权限类型")}</span><span>{t("最后同步")}</span><span>{t("操作")}</span></div>
         {pageAccounts.map((account, index) => (
           <div className="professional-account-row" key={account.id}>
             {selectionMode && <button type="button" className="account-check" onClick={() => toggleSelected(account.id)} aria-label={t(selectedIds.has(account.id) ? "取消选择 {email}" : "选择 {email}", { email: account.email })}><span className={selectedIds.has(account.id) ? "selection-box checked" : "selection-box"}>{selectedIds.has(account.id) && <Check size={12} />}</span></button>}
             <span className="account-index">{(accountPage - 1) * pageSize + index + 1}</span>
-            <div className="professional-account-identity"><span className="account-avatar">{account.email.slice(0, 1).toUpperCase()}</span><div><strong>{account.email}</strong><small>{account.group ? `${account.group} · ` : ""}{account.remark || t("未添加备注")}</small></div></div>
+            <div className="professional-account-identity"><span className="account-avatar">{account.email.slice(0, 1).toUpperCase()}</span><div><strong>{account.email}</strong><small>{account.remark || t("未添加备注")}</small></div></div>
+            <div className="account-tag-list">
+              <button type="button" className={`account-tag group ${account.group ? "" : "muted"}`} title={t("修改分组")} onClick={() => { setGroupValue(account.group || ""); setGroupEditor({ ids: [account.id], batch: false }); }}>{account.group || t("未分组")}</button>
+            </div>
+            <div className="account-tag-list">{(account.occupancies || []).length ? (account.occupancies || []).map((occupancy, occupancyIndex) => {
+              const platform = occupancy.platform || "*";
+              const platformLabel = occupancy.platform || t("全平台");
+              const statusLabel = occupancy.status === "leased" ? t("租用中") : occupancy.status === "occupied" ? t("已占用") : occupancy.status;
+              const busy = releasingKey === `${account.id}:${platform}`;
+              return (
+                <span className={`account-tag occupancy ${occupancy.status || ""} ${occupancy.platform ? "" : "global"}`} title={`${platformLabel} · ${statusLabel}`} key={`${platform}-${occupancy.status}-${occupancyIndex}`}>
+                  {platformLabel}
+                  <button type="button" disabled={busy} aria-label={t("解除 {platform} 的占用", { platform: platformLabel })} title={t("解除占用")} onClick={() => void releaseOccupancy(account, platform)}><X size={11} /></button>
+                </span>
+              );
+            }) : <span className="account-tag muted">{t("未占用")}</span>}</div>
             <span className={account.lastSyncAt ? "account-status synced" : "account-status pending"}>{account.lastSyncAt ? <Check size={13} /> : <RefreshCw size={13} />}{t(account.lastSyncAt ? "正常" : "待检测")}</span>
             <span className="account-permission"><LockKeyhole size={13} /> OAuth2</span>
             <time>{formatDate(account.lastSyncAt, true, language === "en" ? "en-US" : "zh-CN")}</time>
@@ -1865,7 +1922,19 @@ function AccountsPage({ accounts, openImport, notify, reload, authorize, request
         <footer className="accounts-pagination"><span>{t("共 {count} 个账号", { count: filtered.length })}</span><div><button disabled={accountPage <= 1} onClick={() => setAccountPage((page) => Math.max(1, page - 1))}><ChevronLeft size={15} /></button><strong>{accountPage}</strong><span>/ {pageCount}</span><button disabled={accountPage >= pageCount} onClick={() => setAccountPage((page) => Math.min(pageCount, page + 1))}><ChevronRight size={15} /></button></div></footer>
       </div>
       </section>
-      <AccountBatchGroupDialog open={groupDialogOpen} count={selectedIds.size} value={groupValue} loading={busyAction} onChange={setGroupValue} onClose={() => { if (!busyAction) setGroupDialogOpen(false); }} onConfirm={() => void confirmGroup()} />
+      <AccountGroupDialog
+        open={groupEditor !== null}
+        title={groupEditor?.batch ? t("批量设置分组") : t("修改分组")}
+        description={groupEditor?.batch ? t("为已选择的 {count} 个邮箱设置分组", { count: groupEditor.ids.length }) : t("为该邮箱设置或移出分组")}
+        value={groupValue}
+        groups={groups}
+        loading={busyAction}
+        canClear={groupEditor ? accounts.some((account) => groupEditor.ids.includes(account.id) && account.group) : false}
+        onChange={setGroupValue}
+        onClose={() => { if (!busyAction) setGroupEditor(null); }}
+        onConfirm={() => void confirmGroup(groupValue)}
+        onClear={() => void confirmGroup("")}
+      />
       <AccountBatchDeleteDialog open={deleteDialogOpen} count={selectedIds.size} loading={busyAction} onClose={() => { if (!busyAction) setDeleteDialogOpen(false); }} onConfirm={() => void confirmBatchDelete()} />
     </>
   );
@@ -1971,6 +2040,132 @@ function SettingsPage({ authorize }: { authorize: () => void }) {
   );
 }
 
+const scriptEndpointBase = "http://127.0.0.1:3001";
+
+const scriptEndpoints = [
+  {
+    method: "GET",
+    path: "/api/v1/keys/capabilities",
+    summary: "探测接口版本与密钥的固定 scope，用来确认密钥可用、服务端版本匹配。",
+    notes: ["无请求参数。"],
+    request: `curl -s ${scriptEndpointBase}/api/v1/keys/capabilities \\
+  -H "Authorization: Bearer mlk_..."`,
+    response: `{
+  "version": 1,
+  "scopes": ["inbox.lease", "mail.read"]
+}`,
+  },
+  {
+    method: "POST",
+    path: "/api/v1/keys/inboxes/lease",
+    summary: "从指定分组里租一封当前空闲的邮箱，返回租约编号和邮箱地址。",
+    notes: [
+      "group：必填，1-64 字符，对应账号管理里的分组名。",
+      "platform：可选，1-64 位小写字母、数字、连字符或下划线；不传或传 * 表示全平台独占。",
+      "租约有效期 30 分钟，到期自动释放；分组内没有空闲邮箱时返回 409。",
+    ],
+    request: `curl -s ${scriptEndpointBase}/api/v1/keys/inboxes/lease \\
+  -H "Authorization: Bearer mlk_..." \\
+  -H "Content-Type: application/json" \\
+  -d '{"group":"register-pool","platform":"trae"}'`,
+    response: `{
+  "leaseId": "6f1c0c2f8f7c4c0e",
+  "email": "pool01@example.com",
+  "group": "register-pool",
+  "platform": "trae",
+  "status": "leased",
+  "expiresAt": "2026-08-21T04:20:00Z"
+}`,
+  },
+  {
+    method: "GET",
+    path: "/api/v1/keys/inboxes/{leaseId}/messages",
+    summary: "列出该租约邮箱的最新邮件，收件箱与垃圾箱已合并并按时间倒序，最多 100 封。",
+    notes: [
+      "folder 字段标明来源：inbox 或 junk。",
+      "垃圾箱邮件的 id 带 junk: 前缀，直接原样传给读取正文的接口即可。",
+      "租约过期、已 success 或已 release 时返回 404。",
+    ],
+    request: `curl -s ${scriptEndpointBase}/api/v1/keys/inboxes/6f1c0c2f8f7c4c0e/messages \\
+  -H "Authorization: Bearer mlk_..."`,
+    response: `{
+  "messages": [
+    {
+      "id": "1042",
+      "from": "no-reply@trae.ai",
+      "subject": "Your verification code",
+      "receivedAt": "2026-08-21T03:51:12Z",
+      "folder": "inbox"
+    },
+    {
+      "id": "junk:87",
+      "from": "no-reply@other.com",
+      "subject": "Confirm your email",
+      "receivedAt": "2026-08-21T03:44:05Z",
+      "folder": "junk"
+    }
+  ]
+}`,
+  },
+  {
+    method: "GET",
+    path: "/api/v1/keys/inboxes/{leaseId}/messages/{id}",
+    summary: "按列表返回的 id 读取单封邮件正文，用于提取验证码或激活链接。",
+    notes: [
+      "id 用列表里的原值；带 junk: 前缀时只在垃圾箱查找。",
+      "text 是纯文本正文，html 是原始 HTML，可能其中一个为空。",
+    ],
+    request: `curl -s ${scriptEndpointBase}/api/v1/keys/inboxes/6f1c0c2f8f7c4c0e/messages/1042 \\
+  -H "Authorization: Bearer mlk_..."`,
+    response: `{
+  "id": "1042",
+  "from": "no-reply@trae.ai",
+  "subject": "Your verification code",
+  "receivedAt": "2026-08-21T03:51:12Z",
+  "text": "Your code is 483920",
+  "html": "<p>Your code is <b>483920</b></p>"
+}`,
+  },
+  {
+    method: "POST",
+    path: "/api/v1/keys/inboxes/{leaseId}/success",
+    summary: "注册成功后调用，把租约转成长期占用，邮箱不再回到可租池。",
+    notes: [
+      "无需请求体，platform 沿用 lease 时指定的值。",
+      "状态变为 occupied，之后该 leaseId 不能再读信。",
+    ],
+    request: `curl -s -X POST ${scriptEndpointBase}/api/v1/keys/inboxes/6f1c0c2f8f7c4c0e/success \\
+  -H "Authorization: Bearer mlk_..."`,
+    response: `{
+  "leaseId": "6f1c0c2f8f7c4c0e",
+  "email": "pool01@example.com",
+  "group": "register-pool",
+  "platform": "trae",
+  "status": "occupied"
+}`,
+  },
+  {
+    method: "POST",
+    path: "/api/v1/keys/inboxes/{leaseId}/release",
+    summary: "注册失败或超时后调用，取消占用，邮箱立刻回到该分组的可租池。",
+    notes: [
+      "请求体可选，只支持 reason 字段，仅用于记录。",
+      "状态变为 released，之后该 leaseId 不能再读信。",
+    ],
+    request: `curl -s -X POST ${scriptEndpointBase}/api/v1/keys/inboxes/6f1c0c2f8f7c4c0e/release \\
+  -H "Authorization: Bearer mlk_..." \\
+  -H "Content-Type: application/json" \\
+  -d '{"reason":"otp timeout"}'`,
+    response: `{
+  "leaseId": "6f1c0c2f8f7c4c0e",
+  "email": "pool01@example.com",
+  "group": "register-pool",
+  "platform": "trae",
+  "status": "released"
+}`,
+  },
+];
+
 function APIKeysPage() {
   const { language, t } = useI18n();
   const [keys, setKeys] = useState<APIKeySummary[]>([]);
@@ -1980,6 +2175,7 @@ function APIKeysPage() {
   const [error, setError] = useState("");
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [pendingDelete, setPendingDelete] = useState<APIKeySummary | null>(null);
+  const [docsKey, setDocsKey] = useState<APIKeySummary | null>(null);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -2034,7 +2230,7 @@ function APIKeysPage() {
 
   return (
     <section className="admin-professional-page">
-      <header className="accounts-professional-head"><div><h1>{t("API 密钥")}</h1><p>{t("密钥只显示一次。当前用于后续脚本访问，尚未开放接口调用。")}</p></div></header>
+      <header className="accounts-professional-head"><div><h1>{t("API 密钥")}</h1><p>{t("密钥只显示一次。创建后可用 Bearer 调用 /api/v1/keys 脚本接口。")}</p></div></header>
       <div className="settings-professional-list">
         <div className="settings-api-keys">
           <form className="settings-api-keys-create" onSubmit={createKey}>
@@ -2048,7 +2244,10 @@ function APIKeysPage() {
                 <strong>{key.name}</strong>
                 <small>{key.prefix}… · {formatDate(key.createdAt, true, language === "en" ? "en-US" : "zh-CN")}</small>
               </div>
-              <button className="button secondary" disabled={deletingId === key.id} onClick={() => setPendingDelete(key)}>{deletingId === key.id ? t("处理中…") : t("删除")}</button>
+              <div className="settings-api-key-actions">
+                <button className="button secondary" type="button" onClick={() => setDocsKey(key)}><BookOpen size={14} /> {t("使用说明")}</button>
+                <button className="button secondary" disabled={deletingId === key.id} onClick={() => setPendingDelete(key)}>{deletingId === key.id ? t("处理中…") : t("删除")}</button>
+              </div>
             </div>
           ))}
         </div>
@@ -2070,6 +2269,75 @@ function APIKeysPage() {
         <div className="modal-footer">
           <button className="button secondary" disabled={deletingId !== null} onClick={() => setPendingDelete(null)}>{t("取消")}</button>
           <button className="button danger" disabled={deletingId !== null} onClick={() => void deleteKey()}>{deletingId !== null ? t("处理中…") : t("删除")}</button>
+        </div>
+      </Modal>
+      <Modal
+        wide
+        open={Boolean(docsKey)}
+        onClose={() => setDocsKey(null)}
+        title={t("API 密钥使用说明")}
+        description={docsKey ? t("当前密钥：{name}", { name: docsKey.name }) : undefined}
+      >
+        <div className="settings-api-key-docs">
+          <p>{t("创建后即可使用，无需再配权限。只能调用下方脚本接口，不能访问网页账号管理、发信或桌面接口。")}</p>
+          <section>
+            <h3>{t("鉴权")}</h3>
+            <p>{t("请求头使用 Authorization Bearer 加上创建时保存的完整密钥。完整密钥只在创建时显示一次。")}</p>
+            <pre>{`Authorization: Bearer mlk_...`}</pre>
+          </section>
+          <section>
+            <h3>{t("能力范围")}</h3>
+            <ul>
+              <li>{t("固定权限：inbox.lease（租用/释放邮箱）与 mail.read（读取该租约收件箱）。")}</li>
+              <li>{t("只能操作这把密钥所属用户的账号；lease 时必须指定账号分组。")}</li>
+              <li>{t("请先在账号管理里把脚本池邮箱分到同一分组，例如 register-pool。")}</li>
+            </ul>
+          </section>
+          <section>
+            <h3>{t("典型流程")}</h3>
+            <ol className="settings-api-key-flow">
+              <li>{t("lease 领一封邮箱，拿到 leaseId 和 email，租约 30 分钟内有效。")}</li>
+              <li>{t("用 email 去目标平台注册，然后轮询 messages 等验证码，列表已合并收件箱和垃圾箱。")}</li>
+              <li>{t("需要正文时用列表里的 id 调 messages/{id}。")}</li>
+              <li>{t("注册成功调 success 保留占用；失败或超时调 release 把邮箱还回池子。")}</li>
+            </ol>
+          </section>
+          <section>
+            <h3>{t("接口详解")}</h3>
+            <div className="settings-api-key-endpoints">
+              {scriptEndpoints.map((endpoint) => (
+                <article className="settings-api-key-endpoint" key={endpoint.path}>
+                  <header>
+                    <span className={`settings-api-key-method ${endpoint.method.toLowerCase()}`}>{endpoint.method}</span>
+                    <code>{endpoint.path}</code>
+                  </header>
+                  <p>{t(endpoint.summary)}</p>
+                  {endpoint.notes.length > 0 && <ul>{endpoint.notes.map((note) => <li key={note}>{t(note)}</li>)}</ul>}
+                  <div className="settings-api-key-samples">
+                    <div><h4>{t("请求")}</h4><pre>{endpoint.request}</pre></div>
+                    <div><h4>{t("响应")}</h4><pre>{endpoint.response}</pre></div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+          <section>
+            <h3>{t("错误码")}</h3>
+            <table>
+              <thead>
+                <tr><th>{t("状态码")}</th><th>code</th><th>{t("说明")}</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>401</td><td>API_KEY_REQUIRED</td><td>{t("缺少或不是有效的 Bearer mlk_ 密钥")}</td></tr>
+                <tr><td>400</td><td>VALIDATION_FAILED</td><td>{t("group 为空或超长、platform 格式不对")}</td></tr>
+                <tr><td>409</td><td>INBOX_POOL_EXHAUSTED</td><td>{t("该分组当前没有可租用的邮箱")}</td></tr>
+                <tr><td>404</td><td>INBOX_LEASE_NOT_FOUND</td><td>{t("租约不存在、已过期、已 success 或已 release")}</td></tr>
+              </tbody>
+            </table>
+          </section>
+        </div>
+        <div className="modal-footer">
+          <button className="button primary" type="button" onClick={() => setDocsKey(null)}>{t("关闭")}</button>
         </div>
       </Modal>
     </section>

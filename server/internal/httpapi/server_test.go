@@ -355,8 +355,11 @@ func TestAuthenticatedAccountImportsAndBatchActionsHaveNoFixedLimit(t *testing.T
 	if status, _ := apiJSON(t, user, http.MethodPost, server.URL+"/api/accounts/export", map[string]any{"ids": ids}); status != http.StatusOK {
 		t.Fatalf("unlimited export status = %d", status)
 	}
-	if status, _ := apiJSON(t, user, http.MethodPatch, server.URL+"/api/accounts/batch/group", map[string]any{"ids": ids, "group": "bulk"}); status != http.StatusOK {
-		t.Fatalf("unlimited group status = %d", status)
+	if status, grouped := apiJSON(t, user, http.MethodPatch, server.URL+"/api/accounts/batch/group", map[string]any{"ids": ids, "group": "bulk"}); status != http.StatusOK || grouped["accounts"].([]any)[0].(map[string]any)["group"] != "bulk" {
+		t.Fatalf("unlimited group status = %d: %#v", status, grouped)
+	}
+	if status, cleared := apiJSON(t, user, http.MethodPatch, server.URL+"/api/accounts/batch/group", map[string]any{"ids": ids, "group": ""}); status != http.StatusOK || cleared["accounts"].([]any)[0].(map[string]any)["group"] != "" {
+		t.Fatalf("clearing group failed: %d %#v", status, cleared)
 	}
 	if status, result := apiJSON(t, user, http.MethodPost, server.URL+"/api/accounts/batch/delete", map[string]any{"ids": ids}); status != http.StatusOK || result["deleted"] != float64(len(ids)) {
 		t.Fatalf("unlimited batch delete failed: %d %#v", status, result)

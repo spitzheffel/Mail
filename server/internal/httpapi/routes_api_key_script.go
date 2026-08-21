@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -38,7 +39,7 @@ func (s *Server) leaseScriptInbox(response http.ResponseWriter, request *http.Re
 	if n := utf8.RuneCountInString(group); n < 1 || n > 64 {
 		return validation("分组名称必须为 1-64 个字符")
 	}
-	if !scriptPlatformPattern.MatchString(platform) {
+	if platform != "" && platform != model.InboxOccupancyGlobalPlatform && !scriptPlatformPattern.MatchString(platform) {
 		return validation("platform 必须为 1-64 位小写字母、数字、连字符或下划线")
 	}
 	occupancy, err := s.store.LeaseInbox(request.Context(), identityFrom(request).UserID, apiKeyIDFrom(request), group, platform)
@@ -86,11 +87,11 @@ func (s *Server) listScriptInboxMessages(response http.ResponseWriter, request *
 	if err != nil {
 		return err
 	}
-	result, err := s.mail.ListMessages(request.Context(), account, "INBOX", 1, 100, "")
+	messages, err := s.listScriptLeaseMessages(request, account)
 	if err != nil {
 		return err
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"messages": scriptMessageSummaries(result)})
+	writeJSON(response, http.StatusOK, map[string]any{"messages": messages})
 	return nil
 }
 
@@ -103,7 +104,8 @@ func (s *Server) getScriptInboxMessage(response http.ResponseWriter, request *ht
 	if id == "" || len(id) > 1000 {
 		return validation("邮件编号不正确")
 	}
-	detail, err := s.mail.GetMessage(request.Context(), account, "INBOX", id)
+	uid, junkOnly := splitScriptMessageID(id)
+	detail, err := s.getScriptLeaseMessage(request, account, uid, junkOnly)
 	if err != nil {
 		return err
 	}
@@ -116,6 +118,90 @@ func (s *Server) getScriptInboxMessage(response http.ResponseWriter, request *ht
 		"html":       detail.HTML,
 	})
 	return nil
+}
+
+var scriptJunkFolderNames = []string{"Junk", "Junk Email", "Junk E-mail", "JunkEmail", "Spam", "垃圾邮件", "graph:junkemail"}
+
+func (s *Server) listScriptLeaseMessages(request *http.Request, account *model.AccountCredentials) ([]map[string]any, error) {
+	inbox, err := s.mail.ListMessages(request.Context(), account, "INBOX", 1, 100, "")
+	if err != nil {
+		return nil, err
+	}
+	messages := scriptMessageSummaries(inbox, "inbox")
+	if junk, ok := s.listScriptJunkMessages(request, account); ok {
+		messages = append(messages, junk...)
+	}
+	sortScriptMessages(messages)
+	if len(messages) > 100 {
+		messages = messages[:100]
+	}
+	return messages, nil
+}
+
+func (s *Server) listScriptJunkMessages(request *http.Request, account *model.AccountCredentials) ([]map[string]any, bool) {
+	for _, folder := range scriptJunkFolderNames {
+		result, err := s.mail.ListMessages(request.Context(), account, folder, 1, 100, "")
+		if err != nil {
+			continue
+		}
+		messages := scriptMessageSummaries(result, "junk")
+		for _, message := range messages {
+			message["id"] = scriptJunkMessageID(fmt.Sprint(message["id"]))
+		}
+		return messages, true
+	}
+	return nil, false
+}
+
+func (s *Server) getScriptLeaseMessage(request *http.Request, account *model.AccountCredentials, uid string, junkOnly bool) (mailservice.MessageDetail, error) {
+	if !junkOnly {
+		detail, err := s.mail.GetMessage(request.Context(), account, "INBOX", uid)
+		if err == nil {
+			return detail, nil
+		}
+		if strings.HasPrefix(uid, "graph:") || !scriptMessageMissing(err) {
+			return mailservice.MessageDetail{}, err
+		}
+	}
+	var lastErr error
+	for _, folder := range scriptJunkFolderNames {
+		detail, err := s.mail.GetMessage(request.Context(), account, folder, uid)
+		if err == nil {
+			return detail, nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return mailservice.MessageDetail{}, lastErr
+	}
+	return mailservice.MessageDetail{}, &mailservice.Error{Message: "邮件不存在或已被删除", Code: "MESSAGE_NOT_FOUND", Status: http.StatusNotFound}
+}
+
+func scriptJunkMessageID(id string) string {
+	if strings.HasPrefix(id, "graph:") || strings.HasPrefix(id, "junk:") {
+		return id
+	}
+	return "junk:" + id
+}
+
+func splitScriptMessageID(id string) (string, bool) {
+	if strings.HasPrefix(id, "junk:") {
+		return strings.TrimPrefix(id, "junk:"), true
+	}
+	return id, false
+}
+
+func scriptMessageMissing(err error) bool {
+	var mailErr *mailservice.Error
+	return errors.As(err, &mailErr) && (mailErr.Code == "MESSAGE_NOT_FOUND" || mailErr.Status == http.StatusNotFound)
+}
+
+func sortScriptMessages(messages []map[string]any) {
+	sort.SliceStable(messages, func(i, j int) bool {
+		left, _ := messages[i]["receivedAt"].(string)
+		right, _ := messages[j]["receivedAt"].(string)
+		return left > right
+	})
 }
 
 func (s *Server) scriptLeaseAccount(request *http.Request) (*model.AccountCredentials, error) {
@@ -138,11 +224,13 @@ func (s *Server) scriptLeaseAccount(request *http.Request) (*model.AccountCreden
 
 func scriptLeaseJSON(occupancy *model.InboxOccupancy) map[string]any {
 	payload := map[string]any{
-		"leaseId":  occupancy.LeaseID,
-		"email":    occupancy.Email,
-		"platform": occupancy.Platform,
-		"group":    occupancy.GroupName,
-		"status":   occupancy.Status,
+		"leaseId": occupancy.LeaseID,
+		"email":   occupancy.Email,
+		"group":   occupancy.GroupName,
+		"status":  occupancy.Status,
+	}
+	if occupancy.Platform != model.InboxOccupancyGlobalPlatform {
+		payload["platform"] = occupancy.Platform
 	}
 	if occupancy.ExpiresAt != nil {
 		payload["expiresAt"] = occupancy.ExpiresAt
@@ -150,7 +238,7 @@ func scriptLeaseJSON(occupancy *model.InboxOccupancy) map[string]any {
 	return payload
 }
 
-func scriptMessageSummaries(result map[string]any) []map[string]any {
+func scriptMessageSummaries(result map[string]any, folder string) []map[string]any {
 	messages := make([]map[string]any, 0)
 	switch items := result["messages"].(type) {
 	case []mailservice.MessageSummary:
@@ -160,6 +248,7 @@ func scriptMessageSummaries(result map[string]any) []map[string]any {
 				"from":       item.From,
 				"subject":    item.Subject,
 				"receivedAt": item.Date,
+				"folder":     folder,
 			})
 		}
 	}

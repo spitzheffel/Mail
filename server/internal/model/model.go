@@ -55,15 +55,21 @@ type ImportedAccount struct {
 }
 
 type PublicAccount struct {
-	ID          int64   `json:"id"`
-	Email       string  `json:"email"`
-	Remark      string  `json:"remark"`
-	Group       string  `json:"group"`
-	AccountType string  `json:"accountType"`
-	Provider    string  `json:"provider"`
-	CreatedAt   string  `json:"createdAt"`
-	UpdatedAt   string  `json:"updatedAt"`
-	LastSyncAt  *string `json:"lastSyncAt"`
+	ID          int64              `json:"id"`
+	Email       string             `json:"email"`
+	Remark      string             `json:"remark"`
+	Group       string             `json:"group"`
+	AccountType string             `json:"accountType"`
+	Provider    string             `json:"provider"`
+	CreatedAt   string             `json:"createdAt"`
+	UpdatedAt   string             `json:"updatedAt"`
+	LastSyncAt  *string            `json:"lastSyncAt"`
+	Occupancies []AccountOccupancy `json:"occupancies"`
+}
+
+type AccountOccupancy struct {
+	Platform string `json:"platform,omitempty"`
+	Status   string `json:"status"`
 }
 
 type User struct {
@@ -126,9 +132,10 @@ type InboxOccupancy struct {
 }
 
 const (
-	InboxOccupancyLeased   = "leased"
-	InboxOccupancyOccupied = "occupied"
-	InboxOccupancyReleased = "released"
+	InboxOccupancyLeased         = "leased"
+	InboxOccupancyOccupied       = "occupied"
+	InboxOccupancyReleased       = "released"
+	InboxOccupancyGlobalPlatform = "*"
 )
 
 type Identity struct {

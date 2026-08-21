@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/amine123max/Mail/server/internal/model"
@@ -34,7 +35,16 @@ func newLeaseID() (string, error) {
 	return "ls_" + hex.EncodeToString(value), nil
 }
 
+func NormalizeInboxPlatform(platform string) string {
+	value := strings.ToLower(strings.TrimSpace(platform))
+	if value == "" || value == model.InboxOccupancyGlobalPlatform {
+		return model.InboxOccupancyGlobalPlatform
+	}
+	return value
+}
+
 func (s *Store) LeaseInbox(ctx context.Context, userID, apiKeyID int64, group, platform string) (*model.InboxOccupancy, error) {
+	platform = NormalizeInboxPlatform(platform)
 	ownerKey := "user:" + strconv.FormatInt(userID, 10)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -45,11 +55,21 @@ func (s *Store) LeaseInbox(ctx context.Context, userID, apiKeyID int64, group, p
 	if err := s.expireLeasedOccupancies(ctx, tx, now); err != nil {
 		return nil, err
 	}
-	row := tx.QueryRowContext(ctx, `SELECT `+accountColumns+` FROM accounts
-		WHERE owner_key=? AND group_name=? AND id NOT IN (
-			SELECT account_id FROM inbox_occupancies WHERE platform=? AND status IN (?,?)
-		) ORDER BY sort_order ASC, id ASC LIMIT 1`,
-		ownerKey, group, platform, model.InboxOccupancyLeased, model.InboxOccupancyOccupied)
+	var row *sql.Row
+	if platform == model.InboxOccupancyGlobalPlatform {
+		row = tx.QueryRowContext(ctx, `SELECT `+accountColumns+` FROM accounts
+			WHERE owner_key=? AND group_name=? AND id NOT IN (
+				SELECT account_id FROM inbox_occupancies WHERE status IN (?,?)
+			) ORDER BY sort_order ASC, id ASC LIMIT 1`,
+			ownerKey, group, model.InboxOccupancyLeased, model.InboxOccupancyOccupied)
+	} else {
+		row = tx.QueryRowContext(ctx, `SELECT `+accountColumns+` FROM accounts
+			WHERE owner_key=? AND group_name=? AND id NOT IN (
+				SELECT account_id FROM inbox_occupancies
+				WHERE status IN (?,?) AND (platform=? OR platform=?)
+			) ORDER BY sort_order ASC, id ASC LIMIT 1`,
+			ownerKey, group, model.InboxOccupancyLeased, model.InboxOccupancyOccupied, platform, model.InboxOccupancyGlobalPlatform)
+	}
 	account, err := scanStoredAccount(row)
 	if err == sql.ErrNoRows {
 		return nil, ErrInboxPoolExhausted
@@ -136,6 +156,37 @@ func (s *Store) transitionInboxLease(ctx context.Context, apiKeyID int64, leaseI
 	return s.getInboxOccupancy(ctx, `SELECT o.id,o.lease_id,o.user_id,o.api_key_id,o.account_id,o.platform,o.group_name,o.status,o.created_at,o.updated_at,o.expires_at,a.email_encrypted
 		FROM inbox_occupancies o JOIN accounts a ON a.id=o.account_id
 		WHERE o.lease_id=? AND o.api_key_id=?`, leaseID, apiKeyID)
+}
+
+// ReleaseAccountOccupancies frees a mailbox by hand from the web UI. A nil platform
+// releases every active occupancy of the account, otherwise only the matching one.
+// The second result reports whether the account belongs to ownerKey.
+func (s *Store) ReleaseAccountOccupancies(ctx context.Context, ownerKey string, accountID int64, platform *string) (int64, bool, error) {
+	var exists int64
+	err := s.db.QueryRowContext(ctx, "SELECT 1 FROM accounts WHERE owner_key=? AND id=?", ownerKey, accountID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	now := nowISO()
+	var result sql.Result
+	if platform == nil {
+		result, err = s.db.ExecContext(ctx, `UPDATE inbox_occupancies SET status=?, updated_at=?
+			WHERE account_id=? AND status IN (?,?)`,
+			model.InboxOccupancyReleased, now, accountID, model.InboxOccupancyLeased, model.InboxOccupancyOccupied)
+	} else {
+		result, err = s.db.ExecContext(ctx, `UPDATE inbox_occupancies SET status=?, updated_at=?
+			WHERE account_id=? AND platform=? AND status IN (?,?)`,
+			model.InboxOccupancyReleased, now, accountID, NormalizeInboxPlatform(*platform),
+			model.InboxOccupancyLeased, model.InboxOccupancyOccupied)
+	}
+	if err != nil {
+		return 0, true, err
+	}
+	released, err := result.RowsAffected()
+	return released, true, err
 }
 
 func (s *Store) getInboxOccupancy(ctx context.Context, query string, args ...any) (*model.InboxOccupancy, error) {

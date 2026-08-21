@@ -325,15 +325,7 @@ func (s *Service) imapFolders(ctx context.Context, account *model.AccountCredent
 	go func() { errChannel <- connection.List("", "*", mailboxes) }()
 	result := make([]Folder, 0)
 	for mailbox := range mailboxes {
-		var specialUse *string
-		for _, attribute := range mailbox.Attributes {
-			if strings.HasPrefix(attribute, "\\") {
-				value := attribute
-				specialUse = &value
-				break
-			}
-		}
-		result = append(result, Folder{Path: mailbox.Name, Name: mailbox.Name, SpecialUse: specialUse, Delimiter: mailbox.Delimiter})
+		result = append(result, Folder{Path: mailbox.Name, Name: mailbox.Name, SpecialUse: imapSpecialUse(mailbox.Attributes), Delimiter: mailbox.Delimiter})
 	}
 	if err := <-errChannel; err != nil {
 		return nil, err
@@ -597,6 +589,27 @@ func hasFlag(flags []string, target string) bool {
 		}
 	}
 	return false
+}
+
+var imapSpecialUseNames = map[string]string{
+	"\\inbox":   "\\Inbox",
+	"\\sent":    "\\Sent",
+	"\\drafts":  "\\Drafts",
+	"\\trash":   "\\Trash",
+	"\\junk":    "\\Junk",
+	"\\archive": "\\Archive",
+	"\\all":     "\\All",
+	"\\flagged": "\\Flagged",
+}
+
+func imapSpecialUse(attributes []string) *string {
+	for _, attribute := range attributes {
+		if mapped, ok := imapSpecialUseNames[strings.ToLower(attribute)]; ok {
+			value := mapped
+			return &value
+		}
+	}
+	return nil
 }
 
 func formatIMAPAddress(address *imap.Address) string {
